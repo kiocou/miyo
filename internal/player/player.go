@@ -97,15 +97,15 @@ type Player struct {
 	fade   fader
 	gain   float64 // the current track's normalizing gain
 	// measureStop stops measuring the loudness of the track, if it is.
-	measureStop context.CancelFunc
-	loading     bool
-	playing     bool // what the listener wants: false while paused
-	err         string
+	measureStop     context.CancelFunc
+	loading         bool
+	playing         bool // what the listener wants: false while paused
+	err             string
 	gen             int                // counts loads, to drop the results of stale ones
 	reloadSkipCache int                // load gen that bypasses cache (e.g. quality switch)
 	cancelLoad      context.CancelFunc // stops a load that is no longer selected
-	retryTimer  *time.Timer
-	retries     int // reconnections for the current selection
+	retryTimer      *time.Timer
+	retries         int // reconnections for the current selection
 
 	// Crossfade, if set, is how long songs fade into each other as one
 	// ends: 0 for not at all.

@@ -69,12 +69,16 @@ func (a *app) songActions(tr *netease.Track, pid int64) [][]menuAction {
 		if ar.ID != 0 {
 			artist := ar
 			pages = append(pages, menuAction{label: "查看歌手：" + artist.Name, title: artist.Name, note: "歌手", icon: iconUser,
-				do: func() { a.openPage(route{page: pageArtist, id: artist.ID, source: artist.Source, sourceID: artist.SourceID}) }})
+				do: func() {
+					a.openPage(route{page: pageArtist, id: artist.ID, source: artist.Source, sourceID: artist.SourceID})
+				}})
 		}
 	}
 	if tr.Album.ID != 0 {
 		pages = append(pages, menuAction{label: "查看专辑：" + tr.Album.Name, title: tr.Album.Name, note: "专辑", icon: iconAlbum,
-			do: func() { a.openPage(route{page: pageAlbum, id: tr.Album.ID, source: tr.Album.Source, sourceID: tr.Album.SourceID}) }})
+			do: func() {
+				a.openPage(route{page: pageAlbum, id: tr.Album.ID, source: tr.Album.Source, sourceID: tr.Album.SourceID})
+			}})
 	}
 	if len(pages) > 0 {
 		groups = append(groups, pages)

@@ -570,4 +570,3 @@ func TestPlayerBarAndNowPlayingQualitySwitchUI(t *testing.T) {
 		t.Fatalf("expected MiguQuality updated to ZQ24, got %q", b.settings.MiguQuality)
 	}
 }
-

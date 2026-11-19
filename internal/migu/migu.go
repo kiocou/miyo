@@ -362,30 +362,30 @@ func (n *flexInt) UnmarshalJSON(b []byte) error {
 
 // songItem covers both jadeite search v3 song objects and resourceinfo/album/playlist song objects.
 type songItem struct {
-	ID           string    `json:"id"`
-	SongID       string    `json:"songId"`
-	ContentID    string    `json:"contentId"`
-	CopyrightID  string    `json:"copyrightId"`
-	Name         string    `json:"name"`
-	SongName     string    `json:"songName"`
-	DurationMS   flexInt   `json:"duration"`
-	LengthStr    string    `json:"length"`
-	Singer       string    `json:"singer"`
-	SingerID     string    `json:"singerId"`
-	Singers      []singer  `json:"singers"`
-	SingerList   []singer  `json:"singerList"`
-	ArtistsField []singer  `json:"artists"`
-	Albums       []album   `json:"albums"`
-	AlbumName    string    `json:"album"`
-	AlbumID      string    `json:"albumId"`
-	AlbumImgs    []imgItem `json:"albumImgs"`
-	ImgItems     []imgItem `json:"imgItems"`
-	Img1         string    `json:"img1"`
-	Img2         string    `json:"img2"`
-	Img3         string    `json:"img3"`
-	ImgURL       string    `json:"img"`
-	CoverURL     string    `json:"cover"`
-	LyricURL     string    `json:"lyricUrl"`
+	ID             string        `json:"id"`
+	SongID         string        `json:"songId"`
+	ContentID      string        `json:"contentId"`
+	CopyrightID    string        `json:"copyrightId"`
+	Name           string        `json:"name"`
+	SongName       string        `json:"songName"`
+	DurationMS     flexInt       `json:"duration"`
+	LengthStr      string        `json:"length"`
+	Singer         string        `json:"singer"`
+	SingerID       string        `json:"singerId"`
+	Singers        []singer      `json:"singers"`
+	SingerList     []singer      `json:"singerList"`
+	ArtistsField   []singer      `json:"artists"`
+	Albums         []album       `json:"albums"`
+	AlbumName      string        `json:"album"`
+	AlbumID        string        `json:"albumId"`
+	AlbumImgs      []imgItem     `json:"albumImgs"`
+	ImgItems       []imgItem     `json:"imgItems"`
+	Img1           string        `json:"img1"`
+	Img2           string        `json:"img2"`
+	Img3           string        `json:"img3"`
+	ImgURL         string        `json:"img"`
+	CoverURL       string        `json:"cover"`
+	LyricURL       string        `json:"lyricUrl"`
 	LrcURL         string        `json:"lrcUrl"`
 	TrcURL         string        `json:"trcUrl"`
 	MrcURL         string        `json:"mrcUrl"`
@@ -528,8 +528,8 @@ func (s songItem) toTrack() netease.Track {
 	}
 
 	return netease.Track{
-		ID:   virtualID("song", srcID),
-		Name: name,
+		ID:      virtualID("song", srcID),
+		Name:    name,
 		Artists: artists,
 		Album: netease.Album{
 			ID:       virtualID("album", firstNonEmpty(alID, alName)),
@@ -687,12 +687,12 @@ func SearchPageContext(ctx context.Context, query string, kind netease.SearchTyp
 		"searchSwitch": {searchSwitch(kind)},
 	}
 	headers := map[string]string{
-		"uiVersion": "A_music_3.17.0",
-		"ua":        "Android_migu",
-		"ms":        ms,
-		"timestamp": ts,
-		"msisdn":    "",
-		"sign":      signSearchV3(query, ms, "", ts),
+		"uiVersion":  "A_music_3.17.0",
+		"ua":         "Android_migu",
+		"ms":         ms,
+		"timestamp":  ts,
+		"msisdn":     "",
+		"sign":       signSearchV3(query, ms, "", ts),
 		"User-Agent": appUA,
 	}
 
@@ -794,7 +794,7 @@ func searchSongsBMW(ctx context.Context, query string, pageSize, pageNo int) (ne
 		Code string `json:"code"`
 		Info string `json:"info"`
 		Data struct {
-			Total      flexInt `json:"total"`
+			Total      flexInt    `json:"total"`
 			ResultList []songItem `json:"resultList"`
 			Songs      []songItem `json:"songs"`
 			Items      []struct {

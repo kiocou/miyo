@@ -94,7 +94,7 @@ func fetchMyPageMusic(ctx context.Context, uid string) (*myPageMusicResp, error)
 		return nil, errors.New("migu: missing uid")
 	}
 	q := url.Values{
-		"userId":                    {uid},
+		"userId":                     {uid},
 		"queryCollectMusicListCount": {"100"},
 		"queryCreateMusicListCount":  {"100"},
 	}
