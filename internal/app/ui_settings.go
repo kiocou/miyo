@@ -9,6 +9,8 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"netease-music-mygo/internal/migu"
 )
 
 type settingsCategory int
@@ -36,7 +38,7 @@ var settingsCategories = [...]struct {
 	icon  *ui.SVG
 	blurb string
 }{
-	{"账号", false, iconUser, "网易云账号和听歌记录。"},
+	{"账号", false, iconUser, "网易云、咪咕账号和听歌记录。"},
 	{"播放", false, iconHeadset, "音质、声音和定时关闭。"},
 	{"播放页", false, iconSparkles, "背景、光效和歌词排版，改动会立刻出现在下面的预览里。"},
 	{"歌词", false, iconLyrics, "歌词显示什么，以及桌面歌词。"},
@@ -65,6 +67,7 @@ var dangerColor = ui.Hex("#e5484d")
 func (a *app) openSettings() {
 	a.measureCache()
 	a.dl.pathDraft = a.downloadFolder()
+	a.migu.cookieDraft = a.settings.MiguCookie
 	a.settingsView.query = ""
 	a.settingsView.open = true
 	a.showMain()
@@ -204,11 +207,15 @@ func (a *app) settingsNavItems(c *ui.Context, ink paneInk, searching bool) {
 		button.Background(bg).TextColor(ink.text)
 		button.Children(func() {
 			if account {
-				name, sub := "未登录", "登录网易云账号"
-				if a.profile != nil {
-					name, sub = a.profile.Nickname, "网易云账号"
-					a.avatar(c, a.profile.AvatarURL, 42, ink.press)
-				} else {
+				name, sub, avatarURL, miguIcon := a.settingsAccountSummary()
+				switch {
+				case avatarURL != "":
+					a.avatar(c, avatarURL, 42, ink.press)
+				case miguIcon:
+					ui.Box(c).Size(42, 42).Radius(999).Center().Shrink(0).Background(a.pal.accent.Alpha(0.16)).Children(func() {
+						ui.Icon(c, iconUser).Size(20, 20).TextColor(a.pal.accent)
+					})
+				default:
 					ui.Box(c).Size(42, 42).Radius(999).Center().Shrink(0).Background(ink.press).Children(func() {
 						ui.Icon(c, iconUser).Size(20, 20).TextColor(ink.muted)
 					})
@@ -631,14 +638,33 @@ func (a *app) settingsPage(k *settingsKit, category settingsCategory) {
 	}
 }
 
+func (a *app) settingsAccountSummary() (name, sub, avatarURL string, miguIcon bool) {
+	miguName := a.settings.MiguUser
+	if miguName == "" {
+		miguName = "咪咕音乐用户"
+	}
+	if a.isMiguSource() {
+		if migu.HasCookie() {
+			return miguName, "咪咕音乐账号", a.settings.MiguAvatar, true
+		}
+		return "未登录", "登录咪咕账号", "", false
+	}
+	if a.profile != nil {
+		return a.profile.Nickname, "网易云账号", a.profile.AvatarURL, false
+	}
+	if migu.HasCookie() {
+		return miguName, "咪咕已登录（当前：网易云）", a.settings.MiguAvatar, true
+	}
+	return "未登录", "登录网易云账号", "", false
+}
+
 func (a *app) settingsAccountPage(k *settingsKit) {
 	c, ink, s := k.c, k.ink, &a.settings
 	k.group("网易云账号", func() {
 		if a.profile == nil {
 			k.stateRow("未登录", "登录后，每日推荐与歌单将根据你的口味生成", func() {
 				if ui.PrimaryButton(c.Key("login"), "扫码登录").Clicked() {
-					a.settingsView.open = false
-					a.openLogin()
+					a.openLoginFor("")
 				}
 			})
 			return
@@ -657,6 +683,41 @@ func (a *app) settingsAccountPage(k *settingsKit) {
 			})
 		})
 	})
+	k.group("咪咕账号", func() {
+		if !migu.HasCookie() {
+			k.stateRow("未登录", "支持咪咕音乐 App 扫码或浏览器短信验证码一键登录（用于尝试解锁会员音质）", func() {
+				if primaryButton(c.Key("migu-acc-login"), "扫码登录", nil, a.pal, false).Clicked() {
+					a.openMiguLogin()
+				}
+			})
+			return
+		}
+		name := s.MiguUser
+		if name == "" {
+			name = "咪咕音乐用户"
+		}
+		k.block("咪咕 账号 登录 昵称 退出登录 "+name, func() {
+			ui.Row(c).Padding(16, 20).Gap(14).AlignItems(ui.Center).Children(func() {
+				if s.MiguAvatar != "" {
+					a.avatar(c, s.MiguAvatar, 52, ink.press)
+				} else {
+					ui.Box(c).Size(52, 52).Radius(999).Center().Shrink(0).Background(a.pal.accent.Alpha(0.16)).Children(func() {
+						ui.Icon(c, iconUser).Size(24, 24).TextColor(a.pal.accent)
+					})
+				}
+				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {
+					ui.Text(c, name).FontSize(16).FontWeight(700).SingleLine()
+					ui.Text(c, "已登录咪咕音乐").FontSize(12.5).TextColor(ink.muted)
+				})
+				if k.button("migu-acc-relogin", "切换账号…", nil, false, false).Clicked() {
+					a.openMiguLogin()
+				}
+				if k.button("migu-acc-logout", "退出登录", iconSignOut, false, true).Clicked() {
+					a.signOutMigu()
+				}
+			})
+		})
+	})
 	k.group("听歌记录", func() {
 		if !scrobbleWorks {
 			// Shown, but not to be turned on, while NetEase counts none of
@@ -670,7 +731,7 @@ func (a *app) settingsAccountPage(k *settingsKit) {
 		}
 		k.rowOf(settingRow{label: "计入网易云听歌记录", desc: "以网易云 Mac 客户端的身份上报，理论上有账号风险，社区暂无封号案例",
 			tip: "听完或听满 30 秒的歌会计入最近播放、听歌排行和累计听歌，网易云几分钟后才显示。这是网易云未公开的接口，以官方 Mac 客户端的身份发送：理论上存在账号风险，目前社区里还没有因此被封号的案例；网易云也可能随时不再计入。默认关闭", warn: true}, func() {
-			k.toggle("scrobble", "计入网易云听歌记录", &s.Scrobble, a.profile == nil, nil)
+			k.toggle("scrobble", "计入听歌记录", &s.Scrobble, !a.sourceSignedIn(), nil)
 		})
 	})
 }
@@ -678,7 +739,7 @@ func (a *app) settingsAccountPage(k *settingsKit) {
 func (a *app) settingsPlaybackPage(k *settingsKit) {
 	c, s := k.c, &a.settings
 	k.group("音质", func() {
-		k.rowOf(settingRow{label: "播放音质", desc: "无损与 Hi-Res 需要黑胶 VIP，下一首开始生效",
+		k.rowOf(settingRow{label: "播放音质", desc: "网易云无损与 Hi-Res 需要黑胶 VIP；咪咕可在下方单独指定全部档位",
 			tip: "没有黑胶 VIP 时，播放所能播放的最高音质"}, func() {
 			labels := make([]string, len(qualityLevels))
 			chosen := qualityLevels[2].label
@@ -731,6 +792,7 @@ func (a *app) settingsPlaybackPage(k *settingsKit) {
 		})
 		a.outputRow(c, k.row)
 	})
+	a.miguSettingsGroup(k)
 	k.foot("无损与 Hi-Res 需要黑胶 VIP，换音质从下一首开始生效。音量均衡让每首歌听起来一样响；淡入淡出让前后两首衔接在一起。")
 	k.group("定时", func() { a.sleepRow(c, k.stateRow) })
 }
@@ -898,12 +960,12 @@ func (a *app) settingsStoragePage(k *settingsKit) {
 			}
 		})
 		if canRegisterOpenWith {
-			k.row("用 Cloudy 打开音乐文件", "加入 MP3、FLAC 的「打开方式」；要设为默认播放器，请在系统的默认应用设置里选择 Cloudy", func() {
+			k.row("用 迷一会儿 打开音乐文件", "加入 MP3、FLAC 的「打开方式」；要设为默认播放器，请在系统的默认应用设置里选择 迷一会儿", func() {
 				if k.button("open-with", "添加到打开方式", nil, false, false).Clicked() {
 					if err := registerOpenWith(); err != nil {
 						a.toast = "添加失败：" + err.Error()
 					} else {
-						a.toast = "已添加：在音乐文件上右键「打开方式」就能选择 Cloudy"
+						a.toast = "已添加：在音乐文件上右键「打开方式」就能选择 迷一会儿"
 					}
 				}
 				if k.button("default-apps", "默认应用设置", iconExternal, false, false).Clicked() {
@@ -980,7 +1042,7 @@ func (a *app) settingsSystemPage(k *settingsKit) {
 	})
 	k.group("启动", func() {
 		login := a.openAtLogin()
-		k.row("开机时启动", "登录 Windows 后自动打开 Cloudy", func() {
+		k.row("开机时启动", "登录 Windows 后自动打开 迷一会儿", func() {
 			on := login
 			if settingSwitch(k.c.Key("open-at-login"), &on).Label("开机时启动").Changed() {
 				a.setOpenAtLogin(on)
@@ -991,7 +1053,7 @@ func (a *app) settingsSystemPage(k *settingsKit) {
 		})
 	})
 	k.group("关闭窗口", func() {
-		choices := []string{"最小化到托盘", "退出 Cloudy"}
+		choices := []string{"最小化到托盘", "退出 迷一会儿"}
 		chosen := choices[0]
 		if s.CloseQuits {
 			chosen = choices[1]
@@ -1037,7 +1099,7 @@ func (a *app) settingsAboutPage(k *settingsKit) {
 			k.sub("自动安装更新", "后台发现新版本时直接装好，下次打开软件时生效；手动检查仍会先问你", s.UpdateChecks, func() {
 				k.toggle("update-downloads", "自动安装更新", &s.UpdateInstall, false, nil)
 			})
-			k.stateRow("当前版本 "+mygo.App.Version(), "新版本来自 GitHub 的 nya-owo/cloudy", func() {
+			k.stateRow("当前版本 "+mygo.App.Version(), "新版本来自 GitHub 的 kiocou/miyo", func() {
 				if k.button("check-updates", "检查更新", nil, false, false).Clicked() {
 					a.checkForUpdates()
 				}

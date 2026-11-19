@@ -517,6 +517,7 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 		available = ww - a.sideWidth(ww) - 2*glassBarSide - glassBarInset - 20
 	}
 	compact := available < 840
+	showQualityPill := !compact && available >= 920
 	// The play mode goes into the menu only well under that.
 	noMode := available < barNoModeWidth
 	// The controls and the progress keep the middle, between sides that
@@ -528,6 +529,9 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 	// the heart, the comments and, roomy, adding to a playlist.
 	gap := float32(20)
 	tools := float32(6*32 + 5*4) // the floating windows, translation, the queue, the speaker, the details
+	if showQualityPill {
+		tools += 44
+	}
 	songMin := 48 + 12 + 96 + 2*(countSlot(16, true)+4) + 32 + 4
 	if compact {
 		gap = 12
@@ -627,7 +631,7 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 			// steps; roomy, the counts sit in notches of their icons.
 			a.countedHeart(c.Key("like"), tr, 16, muted, !compact).Shrink(0)
 			a.barCommentButton(c.Key("comment-count"), tr, 16, muted, !compact).Shrink(0)
-			if !compact && tr.ProgramID == 0 && tr.ID > 0 {
+			if !compact && tr.ProgramID == 0 && (tr.ID > 0 || tr.Source == "migu") {
 				add := iconButton(c.Key("add-to-playlist"), iconListPlus, 16, muted, "添加到歌单")
 				add.Shrink(0)
 				if add.Clicked() {
@@ -684,6 +688,9 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 			}
 			if iconButton(c.Key("lyric-trans"), iconTranslate, 16, trans, "歌词翻译").Clicked() {
 				a.toggleLyricTrans()
+			}
+			if tr != nil && tr.ProgramID == 0 && tr.LocalPath == "" && showQualityPill {
+				a.qualityButton(c.Key("bar-quality"), tr, pl.Stream(), false).Shrink(0)
 			}
 			a.queueButton(c, muted)
 			a.volumeButton(c, p.text.Alpha(0.75))

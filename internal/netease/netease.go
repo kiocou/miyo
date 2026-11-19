@@ -28,14 +28,18 @@ const UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/6
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
 type Artist struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Source   string `json:"source,omitempty"`
+	SourceID string `json:"sourceId,omitempty"`
 }
 
 type Album struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	PicURL string `json:"picUrl"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	PicURL   string `json:"picUrl"`
+	Source   string `json:"source,omitempty"`
+	SourceID string `json:"sourceId,omitempty"`
 }
 
 type Track struct {
@@ -62,17 +66,113 @@ type Track struct {
 	// LocalPath is where a downloaded or otherwise local song is, rather
 	// than streamed from NetEase: its cover is a file too, in PicURL.
 	LocalPath string `json:"localPath,omitempty"`
+	// External source metadata (e.g. Source="migu") for tracks fetched
+	// directly from a third-party catalog rather than NetEase.
+	Source      string   `json:"source,omitempty"`
+	SourceID    string   `json:"sourceId,omitempty"`
+	CopyrightID string   `json:"copyrightId,omitempty"`
+	SongID      string   `json:"songId,omitempty"`
+	Qualities   []string `json:"qualities,omitempty"`
+	LrcURL      string   `json:"lrcUrl,omitempty"`
+	TrcURL      string   `json:"trcUrl,omitempty"`
+	MrcURL      string   `json:"mrcUrl,omitempty"`
+}
+
+// IsNetEase reports whether the track originates from NetEase (rather than a
+// local file or an external catalog such as Migu).
+func (t *Track) IsNetEase() bool {
+	return (t.Source == "" || t.Source == "netease") && t.LocalPath == "" && t.ID > 0
 }
 
 // Privilege is what NetEase lets the listener signed in, or nobody, do
 // with a track.
 type Privilege struct {
-	ID int64 `json:"id"`
-	St int   `json:"st"` // below 0: taken down
-	Pl int   `json:"pl"` // the best bit rate the listener may play; 0 for none
+	ID             int64  `json:"id"`
+	St             int    `json:"st"` // below 0: taken down
+	Pl             int    `json:"pl"` // the best bit rate the listener may play; 0 for none
+	PlLevel        string `json:"plLevel,omitempty"`
+	PlayMaxBr      int    `json:"playMaxbr,omitempty"`
+	PlayMaxBrLevel string `json:"playMaxBrLevel,omitempty"`
+	MaxBr          int    `json:"maxbr,omitempty"`
+	MaxBrLevel     string `json:"maxBrLevel,omitempty"`
 	// Cs is whether the listener uploaded the track to their cloud drive,
 	// which they play from whatever its rights.
 	Cs bool `json:"cs"`
+}
+
+func levelFromBitrate(br int) int {
+	switch {
+	case br >= 1999000:
+		return 4 // hires
+	case br >= 999000:
+		return 3 // lossless
+	case br >= 320000:
+		return 2 // exhigh
+	case br >= 192000:
+		return 1 // higher
+	case br > 0:
+		return 0 // standard
+	default:
+		return -1
+	}
+}
+
+func levelIndex(lv string) int {
+	switch strings.ToLower(strings.TrimSpace(lv)) {
+	case "jymaster", "sky", "jyeffect", "hires":
+		return 4
+	case "lossless":
+		return 3
+	case "exhigh":
+		return 2
+	case "higher":
+		return 1
+	case "standard":
+		return 0
+	default:
+		return -1
+	}
+}
+
+// AvailableLevels returns the NetEase quality levels this track can actually
+// play under the current account's privilege, from lowest to highest, or nil
+// when Privilege is unknown.
+func (t *Track) AvailableLevels() []string {
+	if t == nil || t.Privilege == nil {
+		return nil
+	}
+	p := t.Privilege
+	capIdx := -1
+	switch {
+	case p.Cs:
+		capIdx = len(Levels) - 1
+	case p.PlLevel != "" && p.PlLevel != "none":
+		capIdx = levelIndex(p.PlLevel)
+	case p.Pl > 0:
+		capIdx = levelFromBitrate(p.Pl)
+	}
+	if capIdx < 0 {
+		if t.Fee == 0 || t.Fee == 8 {
+			capIdx = 2 // exhigh fallback when track is free and pl wasn't provided
+		} else {
+			return nil
+		}
+	}
+	// Never exceed what the track's own audio files offer either.
+	trackIdx := levelIndex(p.PlayMaxBrLevel)
+	if trackIdx < 0 {
+		trackIdx = levelIndex(p.MaxBrLevel)
+	}
+	if trackIdx < 0 {
+		trackIdx = levelFromBitrate(p.PlayMaxBr)
+	}
+	if trackIdx < 0 {
+		trackIdx = levelFromBitrate(p.MaxBr)
+	}
+	if trackIdx >= 0 && trackIdx < capIdx {
+		capIdx = trackIdx
+	}
+	return Levels[:capIdx+1]
 }
 
 // withPrivileges gives tracks their privileges, matched by ID.
@@ -101,6 +201,12 @@ func (t *Track) ArtistNames() string {
 // privilege says, or else as its fee does for anyone, VIP songs (1) and
 // paid albums (4) giving only a preview.
 func (t *Track) Playable() bool {
+	if t.Source != "" && t.Source != "netease" {
+		if t.Privilege != nil && t.Privilege.St < 0 {
+			return false
+		}
+		return true
+	}
 	if t.ProgramID > 0 {
 		// An episode's audio has no privilege: whether it streams, as a
 		// paid one bought, is up to its stream.
@@ -117,8 +223,17 @@ func (t *Track) Playable() bool {
 
 func (t *Track) Length() time.Duration { return time.Duration(t.Duration) * time.Millisecond }
 
-// URL is the track's page on the NetEase website.
+// URL is the track's page on its source website.
 func (t *Track) URL() string {
+	if t.Source == "migu" {
+		if t.CopyrightID != "" {
+			return "https://music.migu.cn/v3/music/song/" + t.CopyrightID
+		}
+		return ""
+	}
+	if t.Source != "" && t.Source != "netease" {
+		return ""
+	}
 	if t.ProgramID > 0 {
 		return apiBase + "/program?id=" + strconv.FormatInt(t.ProgramID, 10)
 	}
@@ -128,6 +243,9 @@ func (t *Track) URL() string {
 // Thread names the track's comments, and what NetEase likes it by, for an
 // episode: the episode's, not its audio's.
 func (t *Track) Thread() string {
+	if !t.IsNetEase() {
+		return ""
+	}
 	if t.ProgramID > 0 {
 		return programThread(t.ProgramID)
 	}
@@ -155,7 +273,9 @@ type Playlist struct {
 		ID int64 `json:"id"`
 	} `json:"trackIds"`
 	// Preview holds a chart's top songs, as its card shows them.
-	Preview []ChartLine `json:"-"`
+	Preview  []ChartLine `json:"-"`
+	Source   string      `json:"source,omitempty"`
+	SourceID string      `json:"sourceId,omitempty"`
 }
 
 // ChartLine is a song at the top of a chart: its name and its artist.
@@ -171,8 +291,14 @@ func (p *Playlist) Cover() string {
 	return p.PicURL
 }
 
-// URL is the playlist's page on the NetEase site.
+// URL is the playlist's page on its source website.
 func (p *Playlist) URL() string {
+	if p.Source == "migu" && p.SourceID != "" {
+		return "https://music.migu.cn/v3/music/playlist/" + p.SourceID
+	}
+	if p.Source != "" && p.Source != "netease" {
+		return ""
+	}
 	return apiBase + "/playlist?id=" + strconv.FormatInt(p.ID, 10)
 }
 
@@ -511,7 +637,11 @@ type Stream struct {
 	// Path is the file the song plays from, a downloaded or the
 	// listener's own, or "" for a stream of NetEase's.
 	Path string `json:"-"`
-	Size int64  `json:"size"` // in bytes
+	// Source identifies which provider supplied this stream (empty for NetEase).
+	Source string `json:"source,omitempty"`
+	// Headers carries optional HTTP request headers needed by external CDNs.
+	Headers map[string]string `json:"-"`
+	Size    int64             `json:"size"` // in bytes
 	// Type is the format: mp3, or flac for the lossless levels.
 	Type string `json:"type"`
 	// Level is the level served, which may be below the one asked for.
@@ -728,6 +858,9 @@ func Sized(pic string, n int) string {
 		return pic
 	}
 	pic = strings.Replace(pic, "http://", "https://", 1)
+	if !strings.Contains(pic, "126.net") && !strings.Contains(pic, "163.com") {
+		return pic
+	}
 	return fmt.Sprintf("%s?param=%dy%d", pic, n, n)
 }
 

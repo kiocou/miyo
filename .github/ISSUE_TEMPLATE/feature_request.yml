@@ -7,7 +7,7 @@ body:
     id: want
     attributes:
       label: 想要什么功能
-      description: 简单说明你希望 Cloudy 能做到什么
+      description: 简单说明你希望 迷一会儿 (Miyo) 能做到什么
     validations:
       required: true
   - type: textarea

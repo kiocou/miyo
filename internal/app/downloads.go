@@ -480,7 +480,7 @@ func (a *app) startDownload(tr netease.Track) {
 	if tr.LocalPath != "" || tr.ProgramID != 0 {
 		return
 	}
-	if !tr.Playable() {
+	if !a.canPlayTrack(&tr) {
 		a.toast = "这首歌暂时没有下载权限"
 		a.redraw()
 		return

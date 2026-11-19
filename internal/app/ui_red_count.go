@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -47,8 +49,17 @@ func (a *app) askRedCount(id int64) *redCountState {
 	}
 	s.busy, s.at = true, time.Now()
 	gen := a.accountGen
+	tr, isMigu := a.miguTrackByID(id)
 	go func() {
-		value, err := fetchRedCount(id)
+		var (
+			value netease.RedCount
+			err   error
+		)
+		if isMigu {
+			value, err = miguSongRedCount(firstNonEmptyStr(tr.SourceID, tr.CopyrightID, tr.SongID))
+		} else {
+			value, err = fetchRedCount(id)
+		}
 		a.post(func() {
 			if gen != a.accountGen || a.redCounts[id] != s {
 				return
@@ -77,9 +88,10 @@ func (a *app) likeCountButton(c *ui.Context, tr *netease.Track, size float32, co
 // countedHeart can put the count in its tooltip only, without reserving
 // empty space for it in a narrow player bar.
 func (a *app) countedHeart(c *ui.Context, tr *netease.Track, size float32, color ui.Color, showCount bool) ui.Element {
-	if tr.LocalPath != "" || tr.ProgramID != 0 {
+	if tr.LocalPath != "" || tr.ProgramID != 0 || (tr.Source != "" && tr.Source != migu.Source) {
 		return a.likeButton(c, tr, size, color)
 	}
+	a.rememberMiguTrack(*tr)
 	s := a.askRedCount(tr.ID)
 	red := a.heartRed()
 	shade := color

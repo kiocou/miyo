@@ -45,7 +45,7 @@ const (
 // importedFamily is the family an imported font is registered under, its
 // own name aside, so that one file can't hide a system font of its name.
 func importedFamily(file string) string {
-	return "Cloudy Imported " + strings.TrimSuffix(file, filepath.Ext(file))
+	return "Miyo Imported " + strings.TrimSuffix(file, filepath.Ext(file))
 }
 
 // uiFonts are the fonts on offer, the default first. Those in the system

@@ -10,9 +10,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: Cloudy 版本
+      label: 迷一会儿 (Miyo) 版本
       description: 在 设置 → 关于 里可以看到
-      placeholder: 例如 1.2.17
+      placeholder: 例如 1.0.0
     validations:
       required: true
   - type: dropdown

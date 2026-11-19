@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -27,9 +28,9 @@ func (a *app) toggleLike(tr *netease.Track) {
 	if tr.LocalPath != "" {
 		return
 	}
-	if a.profile == nil {
+	if !a.signedInForTrack(tr) {
 		a.showMain()
-		a.openLogin()
+		a.openLoginFor(tr.Source)
 		return
 	}
 	if tr.ProgramID != 0 {
@@ -69,9 +70,10 @@ func (a *app) likeCurrent() {
 	if tr == nil || tr.LocalPath != "" {
 		return
 	}
+	signedIn := a.signedInForTrack(tr)
 	a.toggleLike(tr)
 	switch {
-	case a.profile == nil:
+	case !signedIn:
 		return // asked to sign in
 	case !a.isLiked(tr):
 		a.say("like", "已取消喜欢")
@@ -159,8 +161,8 @@ func (a *app) likeButton(c *ui.Context, tr *netease.Track, size float32, color u
 }
 
 func (a *app) heartButton(c *ui.Context, tr *netease.Track, size float32, color, likedColor ui.Color, outline, filled *ui.SVG) ui.Element {
-	// A file on disk has no heart at NetEase.
-	if tr.LocalPath != "" {
+	// Local files have no remote heart.
+	if tr.LocalPath != "" || (tr.Source != "" && tr.Source != migu.Source && tr.ProgramID == 0) {
 		return ui.Box(c).Size(size+16, size+16)
 	}
 	if tr.ProgramID != 0 {
@@ -180,7 +182,7 @@ func (a *app) heartButton(c *ui.Context, tr *netease.Track, size float32, color,
 	burst := ui.Local(wrap, "burst", func() time.Time { return time.Time{} })
 	if b.Clicked() {
 		switch {
-		case a.profile == nil:
+		case !a.signedInForTrack(tr):
 		case liked:
 			b.Jump("pop", 0.8)
 		default:
@@ -252,14 +254,14 @@ func drawBurst(p *ui.Painter, r ui.Rect, size float32, elapsed time.Duration, ac
 
 // likeAnswered applies a reply only to the login that requested it.
 func (a *app) likeAnswered(gen int, id int64, like bool, err error) {
-	if gen != a.accountGen || a.profile == nil {
+	if gen != a.accountGen || (!a.sourceSignedIn() && a.profile == nil && !migu.HasCookie()) {
 		return
 	}
 	e := a.likeEdits[id]
 	if e == nil {
 		if err != nil {
 			a.setLiked(id, !like)
-			a.toast = "操作失败，请稍后再试"
+			a.toast = miguOpFailMessage(err, "操作失败，请稍后再试")
 		}
 		return
 	}
@@ -270,7 +272,7 @@ func (a *app) likeAnswered(gen int, id int64, like bool, err error) {
 	} else if e.desired == like {
 		e.desired = e.confirmed
 		a.applyLike(e, e.confirmed)
-		a.say("like", "操作失败，已恢复原状态，请稍后重试")
+		a.say("like", miguOpFailMessage(err, "操作失败，已恢复原状态，请稍后重试"))
 	}
 	if err != nil {
 		a.likeNext = time.Now().Add(2 * time.Second)

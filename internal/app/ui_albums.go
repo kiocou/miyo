@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -22,9 +23,18 @@ var (
 // loadMyAlbums loads the albums the listener saved.
 func (a *app) loadMyAlbums() {
 	gen := a.accountGen
+	miguSrc := a.isMiguSource()
 	a.myAlbumsBusy, a.myAlbumsErr = true, ""
 	go func() {
-		albums, err := subscribedAlbums()
+		var (
+			albums []netease.AlbumProfile
+			err    error
+		)
+		if miguSrc {
+			albums, err = miguSubscribedAlbums()
+		} else {
+			albums, err = subscribedAlbums()
+		}
 		a.post(func() {
 			if gen != a.accountGen {
 				return
@@ -33,6 +43,9 @@ func (a *app) loadMyAlbums() {
 			if err != nil {
 				a.myAlbumsErr = "专辑加载失败"
 				return
+			}
+			for _, al := range albums {
+				a.rememberMiguAlbum(al.Album)
 			}
 			a.myAlbums, a.myAlbumsErr = albums, ""
 		})
@@ -89,15 +102,25 @@ func (a *app) albumSaved(id int64) bool {
 
 // toggleAlbum saves the album for the listener, or unsaves it.
 func (a *app) toggleAlbum(al netease.AlbumProfile) {
-	if a.profile == nil {
+	isMigu := al.Source == migu.Source
+	signedIn := a.profile != nil
+	if isMigu {
+		signedIn = migu.HasCookie()
+	}
+	if !signedIn {
 		a.showMain()
-		a.openLogin()
+		a.openLoginFor(al.Source)
 		return
 	}
 	saved := a.albumSaved(al.ID)
 	gen := a.accountGen
 	go func() {
-		err := subscribeAlbum(al.ID, !saved)
+		var err error
+		if isMigu {
+			err = miguSubscribeAlbum(al.SourceID, !saved)
+		} else {
+			err = subscribeAlbum(al.ID, !saved)
+		}
 		a.post(func() { a.albumToggled(gen, al, saved, err) })
 	}()
 }
@@ -108,7 +131,7 @@ func (a *app) albumToggled(gen int, al netease.AlbumProfile, saved bool, err err
 		return
 	}
 	if err != nil {
-		a.toast = "操作失败，请稍后再试"
+		a.toast = miguOpFailMessage(err, "操作失败，请稍后再试")
 		a.redraw()
 		return
 	}
@@ -133,7 +156,7 @@ func (a *app) setAlbumSaved(al netease.AlbumProfile, saved bool) {
 // myAlbumsSection lists the albums the listener saved, a row each as their
 // playlists, with a menu of how to order them.
 func (a *app) myAlbumsSection(c *ui.Context) {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		return
 	}
 	if len(a.myAlbums) == 0 && !a.myAlbumsBusy {
@@ -230,7 +253,7 @@ func (a *app) albumRows(c *ui.Context, albums []netease.AlbumProfile) {
 			}}
 		}, nil)
 		if b.Clicked() {
-			a.open(route{page: pageAlbum, id: al.ID})
+			a.open(route{page: pageAlbum, id: al.ID, source: al.Source, sourceID: al.SourceID})
 		}
 	}
 }

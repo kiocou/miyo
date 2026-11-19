@@ -236,9 +236,11 @@ func TestPlaylistBatchUnlike(t *testing.T) {
 	}
 }
 
-// A batch download queues the playable songs it does not have yet.
+// A batch download queues the playable songs it does not have yet when fallback is off,
+// and includes unplayable NetEase tracks when Migu fallback is enabled.
 func TestPlaylistBatchDownloads(t *testing.T) {
 	a := testDownloadApp(t)
+	a.settings.MiguFallback = false
 	old := fetchDownload
 	fetchDownload = func(ctx context.Context, tr netease.Track, level, dir string, progress download.Progress) (download.Item, error) {
 		<-ctx.Done()

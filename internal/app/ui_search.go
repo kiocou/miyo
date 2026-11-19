@@ -6,13 +6,15 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
-// searchResults and searchSuggest search NetEase; tests replace them.
+// searchResults, miguSearchResults and searchSuggest search NetEase and Migu; tests replace them.
 var (
-	searchResults = netease.SearchPage
-	searchSuggest = netease.SearchSuggest
+	searchResults     = netease.SearchPage
+	miguSearchResults = migu.SearchPage
+	searchSuggest     = netease.SearchSuggest
 )
 
 // searchLimit is how many results load at a time.
@@ -47,7 +49,14 @@ func (a *app) search(q string) {
 	if kind == 0 {
 		kind = netease.SearchSongs
 	}
-	a.searchFor(route{page: pageSearch, query: q, kind: kind})
+	src := a.searched.source
+	if src == "" && a.isMiguSource() {
+		src = migu.Source
+	}
+	if !a.settings.MiguSearch && src == migu.Source && !a.isMiguSource() {
+		src = ""
+	}
+	a.searchFor(route{page: pageSearch, query: q, kind: kind, source: src})
 }
 
 // searchFor opens the page of a search, remembering its query. Searched
@@ -82,7 +91,15 @@ func (a *app) moreResults(r route, d *searchData) {
 	d.page.loading, d.page.err = true, ""
 	offset := d.res.Len()
 	go func() {
-		res, err := searchResults(r.query, r.kind, searchLimit, offset)
+		var (
+			res netease.SearchResult
+			err error
+		)
+		if r.source == migu.Source {
+			res, err = miguSearchResults(r.query, r.kind, searchLimit, offset)
+		} else {
+			res, err = searchResults(r.query, r.kind, searchLimit, offset)
+		}
 		a.post(func() {
 			d.page.loading = false
 			if err != nil {
@@ -178,25 +195,54 @@ func (a *app) searchEmpty(c *ui.Context, d *searchData) {
 // of what it may look for instead.
 func (a *app) searchHeader(c *ui.Context, d *searchData) {
 	r := a.route
+	isMigu := r.source == migu.Source
+	kinds := searchKinds
+	if isMigu {
+		kinds = searchKinds[:4] // Migu catalog supports songs, artists, albums, playlists.
+	}
 	sub := "搜索"
+	if isMigu {
+		sub = "搜索（咪咕音乐）"
+	}
 	at := 0
-	for i, k := range searchKinds {
+	for i, k := range kinds {
 		if k.kind == r.kind {
 			at = i
 			if d.page.loaded {
-				sub = fmt.Sprintf("搜索 · 找到 %d %s", d.res.Total, k.unit)
+				if isMigu {
+					sub = fmt.Sprintf("搜索（咪咕音乐）· 找到 %d %s", d.res.Total, k.unit)
+				} else {
+					sub = fmt.Sprintf("搜索 · 找到 %d %s", d.res.Total, k.unit)
+				}
 			}
 		}
 	}
 	a.heading(c, "“"+r.query+"”", sub)
-	ui.Row(c).Margin(0, 0, 18, 0).AlignItems(ui.Center).Children(func() {
-		labels := make([]string, len(searchKinds))
-		for i, k := range searchKinds {
+	ui.Row(c).Gap(10).Margin(0, 0, 18, 0).AlignItems(ui.Center).Children(func() {
+		labels := make([]string, len(kinds))
+		for i, k := range kinds {
 			labels[i] = k.label
 		}
 		if a.segmented(c.Key("kind"), &at, labels...) {
-			r.kind = searchKinds[at].kind
+			r.kind = kinds[at].kind
 			a.show(r)
+		}
+		if a.settings.MiguSearch {
+			srcIdx := 0
+			if isMigu {
+				srcIdx = 1
+			}
+			if a.segmented(c.Key("source"), &srcIdx, "网易云", "咪咕") {
+				if srcIdx == 1 {
+					r.source = migu.Source
+					if r.kind == netease.SearchUsers || r.kind == netease.SearchPodcasts {
+						r.kind = netease.SearchSongs
+					}
+				} else {
+					r.source = ""
+				}
+				a.show(r)
+			}
 		}
 		if r.kind == netease.SearchSongs && len(d.res.Songs) > 0 {
 			ui.Spacer(c)
@@ -225,7 +271,7 @@ func (a *app) artistCard(c *ui.Context, ar *netease.ArtistProfile) {
 		ui.Text(c, ar.Name).FontSize(13).FontWeight(500).SingleLine().AlignSelf(ui.Center)
 	})
 	if card.Clicked() {
-		a.open(route{page: pageArtist, id: ar.ID})
+		a.open(route{page: pageArtist, id: ar.ID, source: ar.Source, sourceID: ar.SourceID})
 	}
 }
 
@@ -233,11 +279,12 @@ func (a *app) artistCard(c *ui.Context, ar *netease.ArtistProfile) {
 // songs it has and who made it under its name, as strangers' playlists
 // are told apart by their makers.
 func (a *app) foundPlaylistCard(c *ui.Context, pl *netease.Playlist) {
+	a.rememberMiguPlaylist(*pl)
 	sub := fmt.Sprintf("%d 首", pl.TrackCount)
 	if pl.Creator.Nickname != "" {
 		sub += " · " + pl.Creator.Nickname
 	}
 	if a.coverCard(c, pl.Name, pl.Cover(), pl.PlayCount, sub, func() { a.loadPlaylist(pl.ID, true) }) {
-		a.open(route{page: pagePlaylist, id: pl.ID})
+		a.open(route{page: pagePlaylist, id: pl.ID, source: pl.Source, sourceID: pl.SourceID})
 	}
 }

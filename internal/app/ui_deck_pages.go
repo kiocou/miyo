@@ -119,10 +119,12 @@ func (a *app) deckHas(pg deckPage) bool {
 		return len(a.daily) > 0
 	case deckStyle:
 		return a.styleCardShown()
-	case deckFM, deckRadar:
+	case deckFM:
+		return a.isMiguSource() || a.profile != nil
+	case deckRadar:
 		return a.profile != nil
 	case deckWeek:
-		return a.profile != nil && len(a.week.songs) > 0
+		return a.sourceSignedIn() && len(a.week.songs) > 0
 	}
 	return false
 }
@@ -299,7 +301,7 @@ func (a *app) fmSheet(c *ui.Context, back bool) {
 			if iconButton(c.Key("next"), iconNext, 20, white.Alpha(0.85), "下一首").Clicked() {
 				pl.Next()
 			}
-			if a.profile != nil && iconButton(c.Key("trash"), iconTrash, 19, white.Alpha(0.85), "不喜欢").Clicked() {
+			if a.sourceSignedIn() && iconButton(c.Key("trash"), iconTrash, 19, white.Alpha(0.85), "不喜欢").Clicked() {
 				a.trashFM()
 			}
 			a.likeButton(c.Key("like"), tr, 20, white.Alpha(0.85))

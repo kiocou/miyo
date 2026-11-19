@@ -14,10 +14,10 @@ import (
 )
 
 // Where the app's source is, as the AGPL asks of a modified version, and what
-// it was made from.
+// it was derived from.
 const (
-	appSource = "https://github.com/nya-owo/cloudy"
-	appOrigin = "https://github.com/egoist/mygo-cloudmusic"
+	appSource = "https://github.com/kiocou/miyo"
+	appOrigin = "https://github.com/nya-owo/cloudy"
 )
 
 //go:embed brand/mascot.png
@@ -54,8 +54,8 @@ func (a *app) aboutCard(k *settingsKit) {
 	ui.Row(c).Padding(16, 20).Gap(14).AlignItems(ui.Center).Children(func() {
 		ui.Image(c, brandIcon()).Size(52, 52).Fit(ui.Cover).Shrink(0)
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(3).Children(func() {
-			ui.Text(c, mygo.App.Name()+" "+mygo.App.Version()).FontSize(14).FontWeight(700)
-			ui.Text(c, "由 nya 制作，基于 egoist/mygo-cloudmusic 修改，以 AGPL-3.0 开源。与网易云音乐官方无关").
+			ui.Text(c, mygo.App.Name()+" (Miyo) "+mygo.App.Version()).FontSize(14).FontWeight(700)
+			ui.Text(c, "迷一会儿 (Miyo) 桌面音乐客户端，基于 Cloudy（AGPL-3.0）衍生修改并支持网易云音乐与咪咕音乐双音源。与网易云音乐及咪咕音乐官方无关").
 				FontSize(12).TextColor(ink.muted).LineHeight(1.4)
 		})
 		if k.button("source", "源码", iconExternal, false, false).Clicked() {

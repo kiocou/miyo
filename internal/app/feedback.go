@@ -21,11 +21,11 @@ import (
 // Feedback goes through FormSubmit, which mails what is posted to it: an app
 // can't hold the password of a mailbox, for anyone could read it out of it.
 // Not to its /ajax/ address, which drops attachments.
-var feedbackTo = "https://formsubmit.co/nya84855@gmail.com"
+var feedbackTo = ""
 
 // feedbackFrom is what names the app to FormSubmit, which goes by where a
 // form is.
-const feedbackFrom = "https://mygo-cloudmusic.nya.invalid/feedback"
+const feedbackFrom = "https://miyo.invalid/feedback"
 
 // How much a message may hold: FormSubmit takes 10 MB in all. It can take
 // most of a minute to answer, so a message goes in the background, and is given
@@ -102,8 +102,16 @@ func (a *app) feedbackCard(c *ui.Context, ink paneInk) {
 			}
 			empty := strings.TrimSpace(f.text) == ""
 			if feedbackBilibiliUID == 0 {
-				if ui.PrimaryButton(c.Key("feedback-send"), label).Disabled(f.sending || empty).Clicked() {
+				if !feedbackMailOpen {
+					settingButton(c.Key("feedback-send"), ink, "用邮件发送 · 未开放", nil, true, false).Tooltip("邮件发送暂未开放，请前往 GitHub 提 Issue")
+				} else if settingButton(c.Key("feedback-send"), ink, label, nil, f.sending || empty, false).Clicked() {
 					a.sendFeedback()
+				}
+				if ui.PrimaryButton(c.Key("feedback-issue"), "前往 GitHub 提 Issue").Clicked() {
+					if !empty {
+						_ = copyText(feedbackMessage(f.text))
+					}
+					_ = openURL(appSource + "/issues/new/choose")
 				}
 				return
 			}
@@ -241,7 +249,7 @@ func postFeedback(text, version string, images []string) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 	fields := [][2]string{
-		{"_subject", "Cloudy 反馈"},
+		{"_subject", "迷一会儿 (Miyo) 反馈"},
 		{"_template", "table"},
 		{"_captcha", "false"},
 		{"反馈内容", text},

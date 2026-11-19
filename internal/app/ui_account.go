@@ -9,13 +9,15 @@ import (
 	"github.com/egoist/mygo/ui"
 	"rsc.io/qr"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
 // loginState is a QR code login under way.
 type loginState struct {
 	open     bool
-	gen      int // counts logins, to stop the polls of closed ones
+	source   string // "" for NetEase, "migu" for Migu Music
+	gen      int    // counts logins, to stop the polls of closed ones
 	key      string
 	code     *qr.Code
 	status   int // a QR state, or 0 while the code loads
@@ -36,6 +38,7 @@ type loginState struct {
 // home page for whoever is listening.
 func (a *app) boot() {
 	a.homeLoading = true
+	a.refreshMiguProfile()
 	go func() {
 		var prof *netease.Profile
 		if netease.RestoreSession() {
@@ -84,7 +87,7 @@ func (a *app) signedIn(prof *netease.Profile) {
 	a.searches = map[route]*searchData{}
 	a.load(a.route)
 	a.loadHome()
-	if prof == nil {
+	if !a.sourceSignedIn() {
 		return
 	}
 	a.refreshLibrary(time.Now())
@@ -92,8 +95,34 @@ func (a *app) signedIn(prof *netease.Profile) {
 }
 
 func (a *app) openLogin() {
-	a.login = loginState{open: true, gen: a.login.gen + 1}
+	a.openLoginFor(a.activeSource())
+}
+
+func (a *app) openLoginFor(src string) {
+	if src != migu.Source {
+		src = ""
+	}
+	a.stopMiguLoginTasks()
+	a.login = loginState{open: true, source: src, gen: a.login.gen + 1}
+	if src == migu.Source {
+		a.migu.login = miguLoginState{gen: a.migu.login.gen + 1, cookieText: a.settings.MiguCookie}
+		if !migu.HasCookie() {
+			a.startMiguQR()
+		}
+		a.redraw()
+		return
+	}
+	if a.profile == nil {
+		a.startNeteaseQR()
+	}
+	a.redraw()
+}
+
+func (a *app) startNeteaseQR() {
+	a.login.gen++
 	gen := a.login.gen
+	a.login.key, a.login.code, a.login.status, a.login.err, a.login.finished = "", nil, 0, "", false
+	a.login.cookie, a.login.cookieErr = false, ""
 	go func() {
 		key, err := netease.QRKey()
 		var code *qr.Code
@@ -215,9 +244,56 @@ func (a *app) signOutDialog(c *ui.Context) {
 func (a *app) loginDialog(c *ui.Context) {
 	p := a.pal
 	l := &a.login
+	wasOpen := l.open
 	a.dialog(c, "login", 0.35, &l.open, func(panel ui.Element) {
 		a.pane(panel, 26, false)
-		panel.Width(340).Padding(28, 28, 26, 28).Gap(6).AlignItems(ui.Center)
+		panel.Width(360).Padding(24, 28, 26, 28).Gap(6).AlignItems(ui.Center)
+
+		// Source selector: choose either NetEase Cloud Music or Migu Music.
+		srcIdx := 0
+		if l.source == migu.Source {
+			srcIdx = 1
+		}
+		ui.Box(c).Margin(0, 0, 10, 0).Children(func() {
+			if a.segmented(c.Key("login-source"), &srcIdx, "网易云音乐", "咪咕音乐") {
+				if srcIdx == 1 {
+					a.setAudioSource(migu.Source)
+					l.source = migu.Source
+					l.gen++ // pause any running NetEase QR poll
+					a.migu.login = miguLoginState{gen: a.migu.login.gen + 1, cookieText: a.settings.MiguCookie}
+					if !migu.HasCookie() {
+						a.startMiguQR()
+					}
+				} else {
+					a.setAudioSource("")
+					a.stopMiguLoginTasks()
+					l.source = ""
+					if a.profile == nil {
+						a.startNeteaseQR()
+					}
+				}
+			}
+		})
+
+		if l.source == migu.Source {
+			a.miguLoginBody(c, panel)
+			return
+		}
+		if a.profile != nil && !l.finished {
+			ui.Text(c, "已登录网易云音乐").FontSize(19).FontWeight(700)
+			ui.Text(c, a.profileName()).FontSize(13).TextColor(p.muted).Margin(0, 0, 14, 0)
+			ui.Row(c).Gap(10).Children(func() {
+				if pillButton(c.Key("ne-use-now"), iconCheck, "使用网易云音源", p.accent, p.onAccent).Clicked() {
+					a.setAudioSource("")
+					l.open = false
+				}
+				if pillButton(c.Key("ne-signout"), iconSignOut, "退出登录", p.hover.Over(p.bg), dangerColor).Clicked() {
+					l.open = false
+					a.askSignOut()
+				}
+			})
+			return
+		}
 		if l.cookie && !l.finished {
 			a.cookieLogin(c, panel)
 			return
@@ -263,7 +339,7 @@ func (a *app) loginDialog(c *ui.Context) {
 					}
 				case l.status == netease.QRExpired || l.err != "":
 					if pillButton(c.Key("refresh"), iconRepeat, "刷新二维码", p.accent, p.onAccent).Clicked() {
-						a.openLogin()
+						a.startNeteaseQR()
 					}
 				}
 			})
@@ -273,6 +349,10 @@ func (a *app) loginDialog(c *ui.Context) {
 			l.cookie, l.cookieErr = true, ""
 		}
 	})
+	if wasOpen && !l.open {
+		l.gen++
+		a.stopMiguLoginTasks()
+	}
 }
 
 // cookieLogin is the other face of the login dialog: a field for the
@@ -292,7 +372,7 @@ func (a *app) cookieLogin(c *ui.Context, panel ui.Element) {
 	if l.cookieErr != "" {
 		ui.Text(c, l.cookieErr).FontSize(12).TextColor(dangerColor).LineHeight(1.4).Margin(4, 0, 0, 0)
 	}
-	ui.Text(c, "Cookie 等同于账号密码，不要发给任何人。Cloudy 只把它存在本机的系统凭据里").
+	ui.Text(c, "Cookie 等同于账号密码，不要发给任何人。迷一会儿 只把它存在本机的系统凭据里").
 		FontSize(11.5).TextColor(p.faint).LineHeight(1.45).Margin(8, 0, 0, 0)
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Margin(16, 0, 0, 0).Children(func() {
 		if textLink(c.Key("to-qr"), "返回扫码登录", p.muted).Clicked() {
@@ -388,20 +468,57 @@ func (a *app) profileName() string {
 func (a *app) accountRow(c *ui.Context) {
 	p := a.pal
 	b := ui.ButtonBase(c.Key("account")).Height(40).PaddingX(8).Gap(10).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false)
-	if b.Hovered() || a.accountOpen && a.profile != nil {
+	miguActive := a.isMiguSource()
+	signedIn := a.profile != nil
+	if miguActive {
+		signedIn = migu.HasCookie()
+	}
+	if b.Hovered() || a.accountOpen && signedIn {
 		b.Background(p.hover)
 	}
-	if a.profile == nil {
+	if !signedIn {
 		a.accountOpen = false
+		text := "登录网易云音乐"
+		badge := ""
+		if miguActive {
+			text = "登录咪咕音乐"
+			badge = "咪咕"
+		}
 		b.Label("登录").Children(func() {
 			ui.Box(c).Size(26, 26).Radius(13).Background(p.press).Center().Children(func() {
 				ui.Icon(c, iconUser).Size(14, 14).TextColor(p.muted)
 			})
-			ui.Text(c, "登录网易云音乐").FontSize(13).FontWeight(500).TextColor(p.muted)
+			ui.Text(c, text).FontSize(13).FontWeight(500).TextColor(p.muted).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+			if badge != "" {
+				ui.Text(c, badge).FontSize(10).FontWeight(700).TextColor(p.accent).Padding(1, 5).Radius(4).Background(p.accent.Alpha(0.12))
+			}
 		})
 		if b.Clicked() {
 			a.openLogin()
 		}
+		return
+	}
+	if miguActive {
+		name := a.settings.MiguUser
+		if name == "" {
+			name = "咪咕音乐用户"
+		}
+		b.Label(name).Expanded(a.accountOpen).Children(func() {
+			if a.settings.MiguAvatar != "" {
+				a.avatar(c, a.settings.MiguAvatar, 26, p.press)
+			} else {
+				ui.Box(c).Size(26, 26).Radius(13).Background(p.accent.Alpha(0.16)).Center().Children(func() {
+					ui.Icon(c, iconUser).Size(14, 14).TextColor(p.accent)
+				})
+			}
+			ui.Text(c, name).FontSize(13).FontWeight(600).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+			ui.Text(c, "咪咕").FontSize(10).FontWeight(700).TextColor(p.accent).Padding(1, 5).Radius(4).Background(p.accent.Alpha(0.12))
+			ui.Icon(c, iconUpDown).Size(13, 13).TextColor(p.faint)
+		})
+		if b.Clicked() {
+			a.accountOpen = !a.accountOpen
+		}
+		a.accountMenu(c, b)
 		return
 	}
 	prof := a.profile
@@ -418,7 +535,7 @@ func (a *app) accountRow(c *ui.Context) {
 
 // accountMenu drops up from the account row, as wide as it, in the colors
 // of the volume popover: the listener's own page and the settings, then
-// signing out.
+// signing out, plus quick audio source switching between NetEase and Migu.
 func (a *app) accountMenu(c *ui.Context, row ui.Element) {
 	pop := popoverColors(a.pal.dark)
 	ui.PopoverBase(c.Key("account-menu"), row, &a.accountOpen, func(panel ui.Element) {
@@ -433,6 +550,29 @@ func (a *app) accountMenu(c *ui.Context, row ui.Element) {
 		if runtime.GOOS == "darwin" {
 			shortcut = "⌘,"
 		}
+		if a.isMiguSource() {
+			if a.menuItem(c, iconUser, "我的主页", "").AutoFocus().Clicked() {
+				a.accountOpen = false
+				a.open(route{page: pageUser, id: a.activeUserID()})
+			}
+			if a.menuItem(c, iconSettings, "设置…", shortcut).Clicked() {
+				a.accountOpen = false
+				a.openSettings()
+			}
+			if a.menuItem(c, iconSignOut, "退出咪咕登录", "").Clicked() {
+				a.accountOpen = false
+				a.signOutMigu()
+			}
+			ui.Box(c).Height(0.5).Margin(4, 8).Background(pop.edge)
+			if a.menuItem(c, iconRepeat, "切换到网易云音乐", "").Clicked() {
+				a.accountOpen = false
+				a.setAudioSource("")
+				if a.profile == nil {
+					a.openLoginFor("")
+				}
+			}
+			return
+		}
 		if a.menuItem(c, iconUser, "我的主页", "").AutoFocus().Clicked() {
 			a.accountOpen = false
 			a.open(route{page: pageUser, id: a.profile.UserID})
@@ -445,6 +585,14 @@ func (a *app) accountMenu(c *ui.Context, row ui.Element) {
 		if a.menuItem(c, iconSignOut, "退出登录…", "").Clicked() {
 			a.accountOpen = false
 			a.askSignOut()
+		}
+		ui.Box(c).Height(0.5).Margin(4, 8).Background(pop.edge)
+		if a.menuItem(c, iconRepeat, "切换到咪咕音乐", "").Clicked() {
+			a.accountOpen = false
+			a.setAudioSource(migu.Source)
+			if !migu.HasCookie() {
+				a.openLoginFor(migu.Source)
+			}
 		}
 	})
 }

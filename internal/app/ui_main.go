@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -16,7 +17,7 @@ const sidebarWidth = 232
 func (a *app) view(c *ui.Context) {
 	// Poll quietly while the real window is open. Testers do not start
 	// background account requests just by drawing a frame.
-	if a.win != nil && a.profile != nil {
+	if a.win != nil && a.sourceSignedIn() {
 		a.pollPersonal(c.Now())
 		c.After(30 * time.Second)
 	}
@@ -120,12 +121,12 @@ func (a *app) view(c *ui.Context) {
 		a.nowPlayingLayer(c, npOpen, npSettled)
 		a.splash(c)
 	})
-	a.loginDialog(c)
 	a.playlistNameDialog(c)
 	a.stylePickerDialog(c)
 	a.deletePlaylistDialog(c)
 	a.downloadDeleteDialog(c)
 	a.settingsPanel(c)
+	a.loginDialog(c)
 	a.globalGlassDialog(c)
 	a.signOutDialog(c)
 	a.introDialog(c)
@@ -315,16 +316,35 @@ func (a *app) load(r route) {
 	case pageHome:
 		a.freshenHome()
 	case pagePlaylist:
-		a.refreshLibrary(time.Now())
+		if r.source == migu.Source && r.sourceID != "" {
+			if a.migu.playlistSource == nil {
+				a.migu.playlistSource = map[int64]string{}
+			}
+			a.migu.playlistSource[r.id] = r.sourceID
+		} else {
+			a.refreshLibrary(time.Now())
+		}
 		a.loadPlaylist(r.id, false)
 	case pageSearch:
 		a.loadSearch(r, false)
 	case pageArtist:
+		if r.source != "" && r.sourceID != "" {
+			d := a.artist(r.id)
+			d.source, d.sourceID = r.source, r.sourceID
+		}
 		a.loadArtist(r.id)
 	case pageAlbum:
+		if r.source != "" && r.sourceID != "" {
+			d := a.albums[r.id]
+			if d == nil {
+				d = &albumData{}
+				a.albums[r.id] = d
+			}
+			d.source, d.sourceID = r.source, r.sourceID
+		}
 		a.loadAlbum(r.id)
 	case pageUser:
-		if a.profile != nil && r.id == a.profile.UserID {
+		if a.sourceSignedIn() && r.id == a.activeUserID() {
 			a.refreshLibrary(time.Now())
 		}
 		a.loadUser(r.id)
@@ -425,7 +445,7 @@ func (a *app) sidebar(c *ui.Context, foreground float32) {
 				a.navItem(c, iconDownload, "下载歌曲", route{page: pageDownloads})
 				a.navItem(c, iconLibrary, "本地音乐", route{page: pageLocal})
 				a.navItem(c, iconHistory, "最近播放", route{page: pageRecent})
-				if a.profile != nil {
+				if a.sourceSignedIn() {
 					a.navItem(c, iconCloud, "我的音乐云盘", route{page: pageCloud})
 				}
 				if a.searched.query != "" {
@@ -700,26 +720,52 @@ func (a *app) loadHome() {
 	a.week.songs = nil
 	a.loadWeek()
 	a.filteredPlaylists = [len(playlistFilters)]*playlistBrowseData{}
-	signedIn := a.profile != nil
+	miguSrc := a.isMiguSource()
+	signedIn := a.sourceSignedIn()
+	gen := a.accountGen
 	at := time.Now()
 	go func() {
-		featured, err1 := netease.FeaturedPlaylists(30)
-		charts, err2 := netease.Charts()
-		daily, _ := netease.DailySongs()
-		var rec []netease.Playlist
-		if signedIn {
-			rec, _ = netease.RecommendedPlaylists()
+		var (
+			featured, charts, rec []netease.Playlist
+			daily                 []netease.Track
+			err1, err2            error
+		)
+		if miguSrc {
+			featured, err1 = miguFeaturedPlaylists(30)
+			charts, err2 = miguCharts()
+			daily, _ = miguDailySongs()
+			if signedIn {
+				rec, _ = miguRecommendedPlaylists()
+			}
+		} else {
+			featured, err1 = netease.FeaturedPlaylists(30)
+			charts, err2 = netease.Charts()
+			daily, _ = netease.DailySongs()
+			if signedIn {
+				rec, _ = netease.RecommendedPlaylists()
+			}
 		}
 		a.post(func() {
+			if gen != a.accountGen {
+				return
+			}
 			a.homeLoading = false
 			if err1 != nil && err2 != nil {
 				// Loading the new day's again, what shows stays, to try
 				// once more.
 				if len(a.featured) == 0 && len(a.charts) == 0 {
-					a.homeErr = "无法连接网易云音乐，请检查网络"
+					if miguSrc {
+						a.homeErr = "无法连接咪咕音乐，请检查网络"
+					} else {
+						a.homeErr = "无法连接网易云音乐，请检查网络"
+					}
 				}
 				return
 			}
+			a.rememberMiguPlaylists(featured)
+			a.rememberMiguPlaylists(charts)
+			a.rememberMiguPlaylists(rec)
+			a.rememberMiguTracks(daily)
 			a.featured, a.charts, a.daily, a.recPlaylists = featured, charts, daily, rec
 			a.homeAt = at
 		})
@@ -767,8 +813,17 @@ func (a *app) loadPlaylist(id int64, thenPlay bool) {
 	delete(a.plErr, id)
 	gen := a.accountGen
 	revision := a.likeRevision
+	miguID := a.migu.playlistSource[id]
 	go func() {
-		pl, err := fetchPlaylist(id)
+		var (
+			pl  *netease.Playlist
+			err error
+		)
+		if miguID != "" {
+			pl, err = migu.PlaylistDetail(miguID)
+		} else {
+			pl, err = fetchPlaylist(id)
+		}
 		a.post(func() {
 			if gen == a.accountGen && revision != a.likeRevision && a.isLikedPlaylist(id) {
 				delete(a.loadingPl, id)
@@ -809,6 +864,7 @@ func (a *app) playlistAnswered(gen int, id int64, pl *netease.Playlist, err erro
 		a.plErr[id] = "歌单加载失败"
 		return
 	}
+	a.rememberMiguPlaylist(*pl)
 	a.playlists[id] = pl
 	if a.playlistAt == nil {
 		a.playlistAt = map[int64]time.Time{}

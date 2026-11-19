@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"netease-music-mygo/internal/download"
 	"netease-music-mygo/internal/local"
 	"netease-music-mygo/internal/lyrics"
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -154,6 +156,15 @@ func (r lyricDownloadRequest) load() ([]lyrics.Line, error) {
 		return r.lines, nil
 	}
 	var fetchErr error
+	if r.song.Source == migu.Source {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		lines, _, err := miguLyrics(ctx, r.song.SourceID, r.song.LrcURL, r.song.TrcURL, r.song.MrcURL)
+		fetchErr = err
+		if err == nil && len(lines) > 0 {
+			return lines, nil
+		}
+	}
 	if r.song.ID > 0 {
 		lrc, trans, yrc, err := downloadLyricsOf(r.song.ID)
 		fetchErr = err

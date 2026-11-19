@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo"
 )
 
 // Feedback goes to the author's Bilibili messages: what was written, with
@@ -19,7 +21,7 @@ func TestFeedbackToBilibili(t *testing.T) {
 	a := newTestApp()
 	a.feedback.text = "  桌面歌词偶尔会闪  "
 	a.feedbackToBilibili()
-	if !strings.HasPrefix(copied, "桌面歌词偶尔会闪\n\n——\nCloudy ") || !strings.Contains(copied, osVersion()) {
+	if !strings.HasPrefix(copied, "桌面歌词偶尔会闪\n\n——\n"+mygo.App.Name()+" ") || !strings.Contains(copied, osVersion()) {
 		t.Errorf("copied %q", copied)
 	}
 	if opened != "https://message.bilibili.com/#/whisper/mid12345" {

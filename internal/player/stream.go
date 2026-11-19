@@ -59,6 +59,7 @@ type download struct {
 	// song, and jumpFails counts the connections ahead that failed.
 	base      context.Context
 	url       string
+	headers   map[string]string
 	ahead     *fetcher
 	a0, a1    int64
 	noJump    bool
@@ -69,8 +70,13 @@ type download struct {
 // that keep keeps once it has all come in: or into memory, without one.
 func startDownload(url string, size int64, part *os.File,
 	keep func(string, int64) (string, bool), settle func(string)) *download {
+	return startDownloadWithHeaders(url, nil, size, part, keep, settle)
+}
+
+func startDownloadWithHeaders(url string, headers map[string]string, size int64, part *os.File,
+	keep func(string, int64) (string, bool), settle func(string)) *download {
 	ctx, cancel := context.WithCancel(context.Background())
-	d := &download{size: size, cancel: cancel, users: 2, base: ctx, url: url}
+	d := &download{size: size, cancel: cancel, users: 2, base: ctx, url: url, headers: headers}
 	d.cond.L = &d.mu
 	switch {
 	case part != nil:
@@ -182,6 +188,9 @@ func (d *download) fetch(ctx context.Context, f *fetcher, from int64) {
 		return
 	}
 	req.Header.Set("User-Agent", netease.UserAgent)
+	for k, v := range d.headers {
+		req.Header.Set(k, v)
+	}
 	want := http.StatusOK
 	if from > 0 {
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(from, 10)+"-")

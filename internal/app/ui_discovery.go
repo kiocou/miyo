@@ -102,13 +102,22 @@ func (a *app) loadPlaylistFilter(filter int) {
 	a.filteredPlaylists[filter] = data
 	gen := a.accountGen
 	pick := playlistFilters[filter]
+	miguSrc := a.isMiguSource()
 	go func() {
 		var lists []netease.Playlist
 		var err error
-		if pick.quality {
-			lists, err = qualityPlaylists(30)
+		if miguSrc {
+			if pick.quality {
+				lists, err = miguHighQualityPlaylists(30)
+			} else {
+				lists, err = miguCategoryPlaylists(pick.category, 30)
+			}
 		} else {
-			lists, err = categoryPlaylists(pick.category, 30)
+			if pick.quality {
+				lists, err = qualityPlaylists(30)
+			} else {
+				lists, err = categoryPlaylists(pick.category, 30)
+			}
 		}
 		a.post(func() { a.playlistFilterAnswered(gen, filter, data, lists, err) })
 	}()
@@ -118,6 +127,7 @@ func (a *app) playlistFilterAnswered(gen, filter int, data *playlistBrowseData, 
 	if gen != a.accountGen || a.filteredPlaylists[filter] != data {
 		return
 	}
+	a.rememberMiguPlaylists(lists)
 	data.loading, data.lists = false, lists
 	if err != nil {
 		data.err = "歌单加载失败，请重试"

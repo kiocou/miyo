@@ -44,9 +44,10 @@ func TestDownloadedTracksPlayLocally(t *testing.T) {
 	}
 }
 
-// A song without the right to play it all is not downloaded.
+// A song without the right to play it all is not downloaded when Migu fallback is off.
 func TestDownloadWithoutPermission(t *testing.T) {
 	a := testDownloadApp(t)
+	a.settings.MiguFallback = false
 	a.startDownload(netease.Track{
 		ID:        8,
 		Name:      "会员歌曲",

@@ -184,6 +184,9 @@ func loudKey(t netease.Track, path string) string {
 	if t.ProgramID != 0 {
 		return "p" + strconv.FormatInt(t.ProgramID, 10)
 	}
+	if t.Source != "" && t.SourceID != "" {
+		return "x" + t.Source + ":" + t.SourceID
+	}
 	if t.ID > 0 {
 		return "n" + strconv.FormatInt(t.ID, 10)
 	}

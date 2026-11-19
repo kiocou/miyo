@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -26,7 +27,7 @@ var scrobbleWorks = true
 // asked for their plays to count there: a NetEase song, signed in, heard
 // to its end or for half a minute at least.
 func (a *app) listened(t netease.Track, played time.Duration, ended bool) {
-	if !scrobbleWorks || !a.settings.Scrobble || a.profile == nil || t.ID <= 0 || t.ProgramID != 0 {
+	if !scrobbleWorks || !a.settings.Scrobble || !a.signedInForTrack(&t) || (t.ID <= 0 && t.Source != migu.Source) || t.ProgramID != 0 {
 		return
 	}
 	if !ended && played < scrobbleAfter {
@@ -37,6 +38,12 @@ func (a *app) listened(t netease.Track, played time.Duration, ended bool) {
 		seconds = int(t.Duration / 1000)
 	}
 	go func() {
+		if t.Source == migu.Source {
+			if err := miguScrobble(t, seconds); err != nil && !errors.Is(err, netease.ErrNotSignedIn) {
+				log.Printf("migu scrobble %s: %v", t.SourceID, err)
+			}
+			return
+		}
 		// Whether NetEase counted it cannot be known here: it answers
 		// success either way, and shows plays minutes later.
 		if err := scrobble(t.ID, 0, seconds); err != nil && !errors.Is(err, netease.ErrNotSignedIn) {

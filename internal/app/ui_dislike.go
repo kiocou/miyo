@@ -6,13 +6,14 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
-// dislikeKind is what not liking tr tells NetEase, if anything: the
+// dislikeKind is what not liking tr tells NetEase or Migu, if anything: the
 // personal FM playing it, or the day's recommendation it is one of.
 func (a *app) dislikeKind(tr *netease.Track) (label string, do func()) {
-	if a.profile == nil || tr == nil || tr.ProgramID != 0 || tr.ID <= 0 {
+	if !a.signedInForTrack(tr) || tr == nil || tr.ProgramID != 0 || (tr.ID <= 0 && tr.Source != migu.Source) {
 		return "", nil
 	}
 	if cur := a.pl.Current(); cur != nil && cur.ID == tr.ID && strings.HasPrefix(a.pl.Radio(), "fm:") {
@@ -56,7 +57,16 @@ func (a *app) dislikeDaily(song netease.Track) {
 	a.toast = "已减少推荐：" + song.Name
 	a.redraw()
 	go func() {
-		next, ok, err := dailyDislike(song.ID)
+		var (
+			next netease.Track
+			ok   bool
+			err  error
+		)
+		if song.Source == migu.Source {
+			next, ok, err = miguDailyDislike(song)
+		} else {
+			next, ok, err = dailyDislike(song.ID)
+		}
 		a.post(func() { a.dailyReplaced(at, next, ok, err) })
 	}()
 }

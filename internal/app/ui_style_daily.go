@@ -42,9 +42,10 @@ var (
 	saveStyleTags   = netease.SaveStyleTags
 )
 
-// loadStyle loads the day's style songs for whoever is signed in.
+// loadStyle loads the day's style songs for whoever is signed in (or active Migu source).
 func (a *app) loadStyle() {
-	if a.profile == nil {
+	miguSrc := a.isMiguSource()
+	if !miguSrc && a.profile == nil {
 		a.style = styleState{}
 		return
 	}
@@ -54,7 +55,15 @@ func (a *app) loadStyle() {
 	a.style.loading, a.style.err = true, ""
 	gen := a.accountGen
 	go func() {
-		songs, err := dailyStyleSongs()
+		var (
+			songs netease.StyleSongs
+			err   error
+		)
+		if miguSrc {
+			songs, err = miguDailyStyleSongs("流行")
+		} else {
+			songs, err = dailyStyleSongs()
+		}
 		a.post(func() {
 			if gen != a.accountGen {
 				return
@@ -65,6 +74,7 @@ func (a *app) loadStyle() {
 				s.err = "风格推荐加载失败"
 				return
 			}
+			a.rememberMiguTracks(songs.Songs)
 			s.songs, s.loaded = songs, true
 		})
 	}()
@@ -91,7 +101,7 @@ func styleCover(songs []netease.Track) string {
 
 // styleCardShown reports whether the home page has the style songs' page.
 func (a *app) styleCardShown() bool {
-	return a.profile != nil && a.style.loaded && len(a.style.songs.Songs) > 0
+	return (a.isMiguSource() || a.profile != nil) && a.style.loaded && len(a.style.songs.Songs) > 0
 }
 
 // recommendedGrid is the day's playlists picked for the listener, two rows
@@ -295,7 +305,7 @@ func drawStyleBackdrop(p *ui.Painter, r ui.Rect, blurred *ui.Bitmap, deep, rich,
 // changes those.
 func (a *app) stylePage(c *ui.Context) {
 	s := &a.style
-	if a.profile == nil {
+	if !a.isMiguSource() && a.profile == nil {
 		a.centered(c, "登录后才能使用风格推荐", nil)
 		return
 	}
@@ -365,8 +375,17 @@ func (a *app) openStylePicker() {
 	}
 	s.catsLoading, s.catsErr = true, ""
 	gen := a.accountGen
+	miguSrc := a.isMiguSource()
 	go func() {
-		cats, err := styleCategories()
+		var (
+			cats []netease.StyleCategory
+			err  error
+		)
+		if miguSrc {
+			cats, err = miguStyleCategories()
+		} else {
+			cats, err = styleCategories()
+		}
 		a.post(func() {
 			if gen != a.accountGen {
 				return
@@ -416,11 +435,30 @@ func (a *app) saveStyles() {
 	s.saving, s.saveErr = true, ""
 	cat, tags := s.cat, slices.Clone(s.picked)
 	gen := a.accountGen
+	miguSrc := a.isMiguSource()
+	var tagName string
+	if miguSrc {
+		for _, c := range s.cats {
+			for _, t := range c.Tags {
+				if t.ID == tags[0] {
+					tagName = t.Name
+					break
+				}
+			}
+		}
+	}
 	go func() {
-		err := saveStyleTags(cat, tags)
-		var songs netease.StyleSongs
-		if err == nil {
-			songs, err = dailyStyleSongs()
+		var (
+			err   error
+			songs netease.StyleSongs
+		)
+		if miguSrc {
+			songs, err = miguDailyStyleSongs(tagName)
+		} else {
+			err = saveStyleTags(cat, tags)
+			if err == nil {
+				songs, err = dailyStyleSongs()
+			}
 		}
 		a.post(func() {
 			if gen != a.accountGen {
@@ -431,6 +469,7 @@ func (a *app) saveStyles() {
 				s.saveErr = "保存失败，请稍后再试"
 				return
 			}
+			a.rememberMiguTracks(songs.Songs)
 			s.songs, s.loaded, s.open = songs, true, false
 		})
 	}()

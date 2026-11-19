@@ -1,12 +1,15 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"netease-music-mygo/internal/download"
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -50,6 +53,13 @@ var tagDownload = func(item download.Item) bool {
 	}
 	if tr.ID > 0 {
 		if lrc, _, _, err := netease.Lyrics(tr.ID); err == nil && lrc != "" {
+			tags.Lyrics = lrc
+			os.WriteFile(download.LyricsPath(item.Path), []byte(lrc), 0o644)
+		}
+	} else if tr.Source == migu.Source {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, lrc, err := migu.Lyrics(ctx, tr.SourceID, tr.LrcURL, tr.TrcURL, tr.MrcURL); err == nil && lrc != "" {
 			tags.Lyrics = lrc
 			os.WriteFile(download.LyricsPath(item.Path), []byte(lrc), 0o644)
 		}
@@ -110,7 +120,7 @@ func (a *app) fixDownloads() {
 	}
 	go func() {
 		for _, it := range todo {
-			known := it.Track.ID > 0
+			known := it.Track.ID > 0 || it.Track.Source != ""
 			if !known {
 				m, ok := matchDownload(it.Track)
 				if !ok {

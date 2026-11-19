@@ -170,7 +170,7 @@ func (a *app) trayCommands() [][]trayCommand {
 		return func() { mygo.App.Focus(); fn() }
 	}
 	return [][]trayCommand{
-		{{icon: iconHome, label: "打开Cloudy", run: a.showMain}},
+		{{icon: iconHome, label: "打开" + mygo.App.Name(), run: a.showMain}},
 		{
 			{icon: playIcon, label: playLabel, disabled: tr == nil, run: a.pl.TogglePlay},
 			{icon: iconPrev, label: "上一首", disabled: tr == nil, run: a.pl.Prev},
@@ -185,7 +185,7 @@ func (a *app) trayCommands() [][]trayCommand {
 		{
 			{icon: iconSettings, label: "设置…", run: front(a.openSettings)},
 			{icon: iconTrayUpdate, label: "检查更新…", run: front(a.checkForUpdates)},
-			{icon: iconSignOut, label: "退出Cloudy", run: mygo.App.Quit},
+			{icon: iconSignOut, label: "退出" + mygo.App.Name(), run: mygo.App.Quit},
 		},
 	}
 }

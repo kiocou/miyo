@@ -40,7 +40,7 @@ var weekRanking = netease.WeekRanking
 // loadWeek loads the week's ranking for whoever is signed in, and the
 // songs they played last.
 func (a *app) loadWeek() {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		a.week = weekState{}
 		return
 	}
@@ -48,10 +48,21 @@ func (a *app) loadWeek() {
 		return
 	}
 	a.week.loading = true
-	uid, gen := a.profile.UserID, a.accountGen
+	miguSrc := a.isMiguSource()
+	uid, gen := a.activeUserID(), a.accountGen
 	go func() {
-		songs, err := weekRanking(uid)
-		plays, _ := recentPlays(300)
+		var (
+			songs []netease.Ranked
+			plays []netease.Play
+			err   error
+		)
+		if miguSrc {
+			songs, err = miguWeekRanking()
+			plays, _ = miguRecentPlays(300)
+		} else {
+			songs, err = weekRanking(uid)
+			plays, _ = recentPlays(300)
+		}
 		stats := weekStatsOf(plays, time.Now())
 		a.post(func() {
 			if gen != a.accountGen {
@@ -59,6 +70,9 @@ func (a *app) loadWeek() {
 			}
 			a.week.loading = false
 			if err == nil {
+				for _, r := range songs {
+					a.rememberMiguTrack(r.Track)
+				}
 				a.week.songs, a.week.stats = songs, stats
 			}
 		})
@@ -332,11 +346,11 @@ func (a *app) weekPage(c *ui.Context) {
 	w := &a.week
 	if len(w.songs) == 0 {
 		msg := "还没有本周的听歌记录"
-		if a.profile == nil {
+		if !a.sourceSignedIn() {
 			msg = "登录后才能查看听歌排行"
 		}
 		var retry func()
-		if a.profile != nil && !w.loading {
+		if a.sourceSignedIn() && !w.loading {
 			retry = a.loadWeek
 		}
 		a.centered(c, msg, retry)

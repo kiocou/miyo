@@ -75,7 +75,7 @@ const sidebarShown = 8
 // openMine opens the listener's page with kind opened, as from the sidebar
 // for the rest of a group.
 func (a *app) openMine(kind string) {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		return
 	}
 	v := &a.mineView
@@ -83,7 +83,7 @@ func (a *app) openMine(kind string) {
 		v.open = map[string]bool{}
 	}
 	v.open[kind], v.query = true, ""
-	a.open(route{page: pageUser, id: a.profile.UserID})
+	a.open(route{page: pageUser, id: a.activeUserID()})
 }
 
 // sideShown is how many of n rows the sidebar lists.

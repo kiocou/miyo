@@ -5,6 +5,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -40,6 +41,17 @@ func (a *app) loadUser(id int64) {
 	if d == nil {
 		d = &userData{}
 		a.users[id] = d
+	}
+	if a.isMiguSource() && migu.HasCookie() && id == miguUserVirtualID {
+		if d.user == nil {
+			d.user = &netease.User{
+				UserID:    miguUserVirtualID,
+				Nickname:  firstNonEmptyStr(a.settings.MiguUser, "咪咕音乐用户"),
+				AvatarURL: a.settings.MiguAvatar,
+			}
+		}
+		a.loadSubscriptions(d)
+		return
 	}
 	if a.profile != nil && a.profile.UserID == id {
 		a.loadSubscriptions(d)
@@ -80,6 +92,23 @@ func (a *app) loadUser(id int64) {
 // the lists are on their way.
 func (a *app) loadSubscriptions(d *userData) {
 	if d.subsLoading > 0 {
+		return
+	}
+	miguSrc := a.isMiguSource()
+	if miguSrc {
+		d.subsLoading = 1
+		go func() {
+			ars, err := miguFollowedArtists()
+			a.post(func() {
+				d.subsLoading--
+				if err == nil {
+					for _, ar := range ars {
+						a.rememberMiguArtist(ar.Artist)
+					}
+					d.artists, d.artistsShown = ars, true
+				}
+			})
+		}()
 		return
 	}
 	d.subsLoading = 2
@@ -133,7 +162,7 @@ func (a *app) userPage(c *ui.Context) {
 		return
 	}
 	u := d.user
-	own := a.profile != nil && a.profile.UserID == id
+	own := a.sourceSignedIn() && a.activeUserID() == id
 	a.scrollPage(c, func() {
 		ui.Row(c).Gap(28).AlignItems(ui.End).Children(func() {
 			ui.Box(c).Size(artistPhotoSize, artistPhotoSize).Radius(artistPhotoSize/2).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {

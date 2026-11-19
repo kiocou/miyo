@@ -11,7 +11,7 @@ import (
 // feedbackMessage is what a listener sends: what they wrote, and what the
 // author needs to know to look into it.
 func feedbackMessage(text string) string {
-	return fmt.Sprintf("%s\n\n——\nCloudy %s · %s · %s", strings.TrimSpace(text), mygo.App.Version(), osVersion(), runtime.GOARCH)
+	return fmt.Sprintf("%s\n\n——\n%s %s · %s · %s", strings.TrimSpace(text), mygo.App.Name(), mygo.App.Version(), osVersion(), runtime.GOARCH)
 }
 
 // feedbackPage is the author's private messages on Bilibili.
@@ -50,7 +50,7 @@ var feedbackMailOpen = false
 
 func feedbackIntro() string {
 	if feedbackBilibiliUID == 0 {
-		return "问题、想法或建议都可以写在这里，会连同图片和软件版本一起发给nya"
+		return "问题、想法或建议都可以写在这里，点「前往 GitHub 提 Issue」会自动复制内容并打开 kiocou/miyo 的反馈页面"
 	}
-	return "问题、想法或建议都可以写在这里。点「发到 B 站私信」会复制内容、软件和系统版本，并打开 nya 的私信页面，粘贴发送即可"
+	return "问题、想法或建议都可以写在这里。点「发到 B 站私信」会复制内容、软件和系统版本，并打开私信页面，粘贴发送即可"
 }

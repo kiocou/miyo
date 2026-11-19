@@ -131,10 +131,10 @@ func (c *Cache) download(id int64, st *netease.Stream) *download {
 	part := c.part(st)
 	if part == nil {
 		part, _ = os.CreateTemp("", streamSpools)
-		return startDownload(st.URL, st.Size, part, nil, nil)
+		return startDownloadWithHeaders(st.URL, st.Headers, st.Size, part, nil, nil)
 	}
 	keep, settle := c.keeper(id, st)
-	return startDownload(st.URL, st.Size, part, keep, settle)
+	return startDownloadWithHeaders(st.URL, st.Headers, st.Size, part, keep, settle)
 }
 
 // part makes a file for a song of the stream st to come into, or returns

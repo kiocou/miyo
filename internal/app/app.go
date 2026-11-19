@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/download"
 	"netease-music-mygo/internal/netease"
 	"netease-music-mygo/internal/player"
 )
@@ -37,6 +38,9 @@ type route struct {
 	page pageKind
 	// id is the playlist, artist, album, user or podcast the page shows.
 	id int64
+	// source and sourceID identify non-NetEase catalog routes (e.g. "migu").
+	source   string
+	sourceID string
 	// query and kind are what a search page searched for.
 	query string
 	kind  netease.SearchType
@@ -251,6 +255,7 @@ type app struct {
 
 	settings     settings
 	settingsView settingsView    // the settings panel
+	migu         miguState       // Migu audio source and probe state
 	shownLines   shownCache      // the lyrics shown, without credits if hidden
 	update       updateState     // the update pane, and the update it found
 	whatsNew     whatsNewState   // what the version updated to brought, said once
@@ -373,6 +378,7 @@ func Run() error {
 	a.useUpdater()
 	mygo.App.WhenReady(func() {
 		a.settings = loadSettings()
+		a.applyMiguSettings()
 		a.applyOutput()
 		a.settings.applyAppearance()
 		a.loadFont()
@@ -384,6 +390,9 @@ func Run() error {
 		a.pl.PodcastSpeed = a.settings.PodcastSpeed
 		a.pl.SetEffects(a.currentEffects(), false)
 		a.pl.Quality = func() string { return a.settings.Quality }
+		a.pl.ResolveStream = a.resolveStream
+		a.pl.AllowCachedStream = a.allowCachedStream
+		download.ResolveStream = a.resolveStream
 		a.useMoreWords()
 		a.pl.Normalize = func() bool { return a.settings.Normalize }
 		a.pl.Crossfade = a.crossfade
@@ -401,6 +410,8 @@ func Run() error {
 			a.toast = "定时结束，本首播完后已暂停"
 		}
 		a.pl.Changed = func() {
+			a.checkQualitySwitchResult()
+			a.ensureTrackQualityMetadata(a.pl.Current())
 			a.keepSession()
 			a.autoFollow()
 			a.syncCaptions()

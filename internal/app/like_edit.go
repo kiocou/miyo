@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -94,9 +95,14 @@ func (a *app) flushLike(id int64, e *likeEdit, now time.Time) {
 	}
 	e.busy = true
 	a.likeNext = now.Add(likeRequestGap)
-	gen, like := a.accountGen, e.desired
+	gen, like, tr := a.accountGen, e.desired, e.track
 	go func() {
-		err := likeSong(id, like)
+		var err error
+		if tr.Source == migu.Source {
+			err = miguLike(tr, like)
+		} else {
+			err = likeSong(id, like)
+		}
 		a.post(func() {
 			if a.likeEdits[id] == e {
 				a.likeAnswered(gen, id, like, err)

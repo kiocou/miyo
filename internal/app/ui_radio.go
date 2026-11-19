@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -71,7 +72,11 @@ func (a *app) radioFeed(name string) func(got func([]netease.Track)) {
 		switch {
 		case strings.HasPrefix(name, "fm:"):
 			mode := strings.TrimPrefix(name, "fm:")
-			fetch = func() ([]netease.Track, error) { return personalFM(mode) }
+			if a.isMiguSource() {
+				fetch = func() ([]netease.Track, error) { return miguPersonalFM(mode) }
+			} else {
+				fetch = func() ([]netease.Track, error) { return personalFM(mode) }
+			}
 		case isRoam(name):
 			label := strings.TrimPrefix(name, stylePrefix)
 			if a.roam == nil {
@@ -197,10 +202,14 @@ func (a *app) trashFM() {
 	if tr == nil {
 		return
 	}
-	id, roaming := tr.ID, isRoam(a.pl.Radio())
+	id, roaming, song := tr.ID, isRoam(a.pl.Radio()), *tr
 	a.pl.Next()
 	if !roaming {
-		go netease.FMTrash(id)
+		if song.Source == migu.Source {
+			go miguFMTrash(song)
+		} else {
+			go netease.FMTrash(id)
+		}
 	}
 }
 
@@ -209,7 +218,7 @@ func (a *app) trashFM() {
 func (a *app) startHeartMode() {
 	if a.profile == nil {
 		a.showMain()
-		a.openLogin()
+		a.openLoginFor("")
 		return
 	}
 	pid := a.likedPlaylist()
@@ -362,7 +371,7 @@ func (a *app) fmCard(c *ui.Context) {
 					a.artistLinks(c, tr, white.Alpha(0.7), white, true).FontSize(14).SingleLine()
 				}
 				ui.Row(c).Gap(14).AlignItems(ui.Center).Margin(20, 0, 0, -8).Children(func() {
-					if a.profile != nil {
+					if a.sourceSignedIn() {
 						if iconButton(c.Key("trash"), iconTrash, 20, white.Alpha(0.8), "不喜欢").Clicked() {
 							a.trashFM()
 						}
@@ -497,7 +506,7 @@ func (a *app) heartCard(c *ui.Context, p palette) {
 		}
 		label := "开启心动模式"
 		switch {
-		case a.profile == nil:
+		case !a.sourceSignedIn():
 			label = "登录后开启"
 		case on:
 			label = "正在播放"

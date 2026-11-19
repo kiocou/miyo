@@ -397,7 +397,12 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 							// An episode's speed, where a song shows its quality.
 							a.speedButton(c)
 						} else {
-							qualityBadge(c, pl.Stream())
+							ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+								streamSourceBadge(c, tr, pl.Stream())
+								if tr.LocalPath == "" {
+									a.qualityButton(c.Key("np-quality"), tr, pl.Stream(), true)
+								}
+							})
 						}
 						ui.Spacer(c)
 						status := "-" + clock(pl.Duration()-pl.Position())
@@ -669,19 +674,6 @@ func (a *app) radioChip(c *ui.Context, name string) {
 	if chip.Clicked() {
 		a.exitRadio()
 	}
-}
-
-// qualityBadge marks a lossless stream, as it plays.
-func qualityBadge(c *ui.Context, st *netease.Stream) {
-	if st == nil || !netease.Lossless(st.Level) {
-		return
-	}
-	label := "无损"
-	if st.Level == "hires" {
-		label = "Hi-Res"
-	}
-	ui.Text(c, label).FontSize(9.5).FontWeight(800).LetterSpacing(0.6).TextColor(ui.Hex("#f5d58a")).
-		Padding(1, 6).Radius(4).Border(1, ui.Hex("#f5d58a").Alpha(0.55))
 }
 
 // stageBar is the slim bar along the foot of the stage: what plays, where

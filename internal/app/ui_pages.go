@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 	"netease-music-mygo/internal/player"
 )
@@ -52,7 +53,9 @@ func (a *app) homePage(c *ui.Context) {
 		a.startMark(c)
 		defer a.endMark(c)
 		hello := greeting(now)
-		if a.profile != nil {
+		if a.isMiguSource() && migu.HasCookie() && a.settings.MiguUser != "" {
+			hello += "，" + a.settings.MiguUser
+		} else if !a.isMiguSource() && a.profile != nil {
 			hello += "，" + a.profile.Nickname
 		}
 		a.heading(c, hello, fmt.Sprintf("%d月%d日 %s", now.Month(), now.Day(), weekday(now)))
@@ -482,7 +485,8 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 			shift += 10 * (1 - shown)
 		}
 		row.Translate(0, shift)
-		if !tr.Playable() {
+		playable := a.canPlayTrack(tr)
+		if !playable {
 			shown *= 0.42
 		}
 		if shown < 1 {
@@ -497,7 +501,7 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 				switch {
 				case playing:
 					a.nowPlayingBars(c)
-				case hovered && tr.Playable():
+				case hovered && playable:
 					ui.Icon(c, iconPlay).Size(13, 13).TextColor(p.text)
 				default:
 					ui.Textf(c, "%d", i+1).FontSize(13).FontFeatures("tnum").TextColor(p.faint)
@@ -521,9 +525,7 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 				}
 				ui.RichText(c, spans...).FontSize(14).SingleLine()
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					if !tr.Playable() {
-						ui.Text(c, "VIP").FontSize(9).FontWeight(800).TextColor(p.accent).Padding(0, 4).Radius(3).Border(1, p.accent.Alpha(0.6))
-					}
+					a.trackBadge(c, tr, p)
 					if batch {
 						ui.Text(c, tr.ArtistNames()).FontSize(12.5).TextColor(p.muted).SingleLine().Shrink(1).MinWidth(0)
 					} else {
@@ -547,12 +549,12 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 					if batch || tr.Album.ID == 0 {
 						ui.Text(c, tr.Album.Name)
 					} else {
-						a.link(c.Key("album"), tr.Album.Name, shade, p.text, route{page: pageAlbum, id: tr.Album.ID})
+						a.link(c.Key("album"), tr.Album.Name, shade, p.text, route{page: pageAlbum, id: tr.Album.ID, source: tr.Album.Source, sourceID: tr.Album.SourceID})
 					}
 				})
 			}
 			// A liked song's heart shows; the others' as the pointer is on them.
-			if tr.LocalPath == "" && !batch {
+			if tr.LocalPath == "" && !batch && (tr.IsNetEase() || tr.Source == migu.Source || tr.ProgramID > 0) {
 				ui.Box(c).Size(32, 32).Center().Children(func() {
 					if a.liked[tr.ID] || hovered {
 						a.likeButton(c.Key("like"), tr, 15, p.muted)
@@ -565,7 +567,7 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 			switch {
 			case batch:
 				a.toggleBatch(tr.ID)
-			case tr.Playable():
+			case playable:
 				a.pl.PlayQueue(tracks, i)
 			}
 		}

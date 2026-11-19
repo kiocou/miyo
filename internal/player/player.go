@@ -43,6 +43,12 @@ type Player struct {
 	// a downloaded song plays from it wherever it was started from, not
 	// from the network. It is called off the window's goroutine.
 	LocalFile func(id int64) string
+	// ResolveStream, if set, resolves a playable stream for track at level
+	// (e.g. direct external sources or Migu fallback). Nil falls back to songURL.
+	ResolveStream func(ctx context.Context, t netease.Track, level string) (*netease.Stream, error)
+	// AllowCachedStream, if set, vets a cached stream before playing it
+	// (e.g. rejecting cached fallback audio when fallback is disabled).
+	AllowCachedStream func(t netease.Track, st *netease.Stream) bool
 	// Changed, if set, hears that what plays, where it is or whether it
 	// plays changed.
 	Changed func()
@@ -95,8 +101,9 @@ type Player struct {
 	loading     bool
 	playing     bool // what the listener wants: false while paused
 	err         string
-	gen         int                // counts loads, to drop the results of stale ones
-	cancelLoad  context.CancelFunc // stops a load that is no longer selected
+	gen             int                // counts loads, to drop the results of stale ones
+	reloadSkipCache int                // load gen that bypasses cache (e.g. quality switch)
+	cancelLoad      context.CancelFunc // stops a load that is no longer selected
 	retryTimer  *time.Timer
 	retries     int // reconnections for the current selection
 
@@ -797,6 +804,20 @@ func (p *Player) load(at int) {
 	p.loadSkipping(at, 0, true, 0, 1)
 }
 
+// Reload re-opens the active track at its current playback position (keeping
+// playing/paused state and bypassing the stream cache for this reload) so an
+// updated audio quality takes effect immediately.
+func (p *Player) Reload() bool {
+	if p.track == nil || p.track.LocalPath != "" || p.at < 0 || p.at >= len(p.order) {
+		return false
+	}
+	pos := p.Position()
+	play := p.playing
+	p.reloadSkipCache = p.gen + 1
+	p.loadSkipping(p.at, 0, play, pos, 1)
+	return true
+}
+
 // loadSkipping loads the track at order[at], to play or not, from from,
 // skipping those that cannot play: skipped of them so far.
 func (p *Player) loadSkipping(at, skipped int, play bool, from time.Duration, direction int) {
@@ -827,10 +848,14 @@ func (p *Player) loadAttempt(at, skipped int, play bool, from time.Duration, dir
 	p.cancelLoad = cancel
 	p.at = at
 	t := p.queue[p.order[at]]
+	sameTrack := p.track != nil && p.track.ID == t.ID
+	skipCache := gen == p.reloadSkipCache
 	p.track = &t
 	p.loading, p.playing, p.err = true, play, ""
 	p.awaiting = false
-	p.lyrics, p.lyricsLoaded = nil, false
+	if !sameTrack {
+		p.lyrics, p.lyricsLoaded = nil, false
+	}
 	p.pending = from
 	p.announce(&t, nil)
 	p.refill()
@@ -924,7 +949,7 @@ func (p *Player) loadAttempt(at, skipped int, play bool, from time.Duration, dir
 				err = ctx.Err()
 			}
 		} else {
-			info, s, err = p.openContext(ctx, t, level)
+			info, s, err = p.openContextMode(ctx, t, level, skipCache)
 		}
 		p.post(func() {
 			if gen != p.gen {
@@ -1057,13 +1082,17 @@ func openLocal(path string, d int64) (*netease.Stream, stream, error) {
 }
 
 func (p *Player) openContext(ctx context.Context, t netease.Track, level string) (*netease.Stream, stream, error) {
+	return p.openContextMode(ctx, t, level, false)
+}
+
+func (p *Player) openContextMode(ctx context.Context, t netease.Track, level string, skipCache bool) (*netease.Stream, stream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
 	if t.LocalPath != "" {
 		return openLocal(t.LocalPath, t.Duration)
 	}
-	if p.LocalFile != nil && t.ID > 0 && t.ProgramID == 0 {
+	if !skipCache && p.LocalFile != nil && t.ID != 0 && t.ProgramID == 0 {
 		// Downloaded: from its file, whatever page it was started from. A
 		// file that fails to open plays from the network instead.
 		if path := p.LocalFile(t.ID); path != "" {
@@ -1072,22 +1101,42 @@ func (p *Player) openContext(ctx context.Context, t netease.Track, level string)
 			}
 		}
 	}
-	dl, info, ok := p.Cache.lookup(t.ID, level)
-	if ok {
-		s, err := openStream(dl, t.Duration)
-		if err == nil {
-			return info, s, nil
+	var (
+		dl   *download
+		info *netease.Stream
+		ok   bool
+	)
+	if !skipCache {
+		dl, info, ok = p.Cache.lookup(t.ID, level)
+		if ok && p.AllowCachedStream != nil && !p.AllowCachedStream(t, info) {
+			dl.Close()
+			ok = false
 		}
-		path := dl.file.Name()
-		dl.Close()
-		// A corrupt cached copy is retried from the network for this
-		// song alone; it is never treated as a missing playback right.
-		p.Cache.remove(path)
+		if ok {
+			s, err := openStream(dl, t.Duration)
+			if err == nil {
+				return info, s, nil
+			}
+			path := dl.file.Name()
+			dl.Close()
+			// A corrupt cached copy is retried from the network for this
+			// song alone; it is never treated as a missing playback right.
+			p.Cache.remove(path)
+		}
 	}
-	info, err := songURL(ctx, t.ID, level)
+	var (
+		info2 *netease.Stream
+		err   error
+	)
+	if p.ResolveStream != nil {
+		info2, err = p.ResolveStream(ctx, t, level)
+	} else {
+		info2, err = songURL(ctx, t.ID, level)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
+	info = info2
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"netease-music-mygo/internal/download"
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -59,7 +60,7 @@ func (a *app) downloadAll(tracks []netease.Track) {
 	a.loadDownloads(false)
 	queued, skipped := 0, 0
 	for _, tr := range tracks {
-		if tr.LocalPath != "" || tr.ProgramID != 0 || !tr.Playable() || a.downloaded(tr.ID) || a.downloadPending(tr.ID) {
+		if tr.LocalPath != "" || tr.ProgramID != 0 || !a.canPlayTrack(&tr) || a.downloaded(tr.ID) || a.downloadPending(tr.ID) {
 			skipped++
 			continue
 		}
@@ -99,16 +100,16 @@ func (a *app) unlikeAll(tracks []netease.Track) {
 // that state. The hearts change at once; the requests go one by one, and
 // one NetEase refuses goes back.
 func (a *app) setLikedAll(tracks []netease.Track, like bool) {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		a.showMain()
-		a.openLogin()
+		a.openLoginFor(a.activeSource())
 		return
 	}
 	seen := map[int64]bool{}
 	edits := map[int64]*likeEdit{}
 	var ids []int64
 	for _, tr := range tracks {
-		if tr.LocalPath != "" || tr.ProgramID != 0 || tr.ID == 0 || seen[tr.ID] || a.liked[tr.ID] == like {
+		if tr.LocalPath != "" || tr.ProgramID != 0 || (!tr.IsNetEase() && tr.Source != migu.Source) || seen[tr.ID] || a.liked[tr.ID] == like {
 			continue
 		}
 		seen[tr.ID] = true
@@ -137,7 +138,13 @@ func (a *app) setLikedAll(tracks []netease.Track, like bool) {
 	go func() {
 		failed := 0
 		for i, id := range ids {
-			if err := likeSong(id, like); err != nil {
+			var err error
+			if tr := edits[id].track; tr.Source == migu.Source {
+				err = miguLike(tr, like)
+			} else {
+				err = likeSong(id, like)
+			}
+			if err != nil {
 				failed++
 				a.post(func() {
 					if gen == a.accountGen {
@@ -172,7 +179,7 @@ func (a *app) addAllToQueue(tracks []netease.Track) {
 	var add []netease.Track
 	skipped := 0
 	for _, tr := range tracks {
-		if tr.Playable() && tr.LocalPath == "" && tr.ProgramID == 0 {
+		if a.canPlayTrack(&tr) && tr.LocalPath == "" && tr.ProgramID == 0 {
 			add = append(add, tr)
 		} else {
 			skipped++

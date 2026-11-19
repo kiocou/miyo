@@ -301,7 +301,7 @@ func (a *app) wall(c *ui.Context, y, w, h, top, foot, frost float32) {
 		if hover >= 0 {
 			a.songContext(plane, &queue[hover], 0)
 		}
-		if plane.Clicked() && hover >= 0 && hover != playing && queue[hover].Playable() {
+		if plane.Clicked() && hover >= 0 && hover != playing && a.canPlayTrack(&queue[hover]) {
 			pl.Jump(hover)
 		}
 	})
@@ -336,7 +336,7 @@ func (a *app) wallTile(c *ui.Context, tr *netease.Track, i int, x float32, playi
 	tile := ui.Box(c.Key(i)).Absolute().Left(x).Top(0).Size(wallTile, wallTile).Radius(14).
 		Label(tr.Name)
 	tile.AnimatePose(ui.Pose{Scale: lift}, ui.Animation{Spring: ui.SpringOptions{Duration: 400 * time.Millisecond, Bounce: 0.2}})
-	if !tr.Playable() {
+	if !a.canPlayTrack(tr) {
 		tile.Opacity(0.4)
 	}
 	if playing {

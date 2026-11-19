@@ -16,7 +16,7 @@ func (a *app) localPage(c *ui.Context) {
 	a.loadLibrary(false)
 	if len(a.settings.LocalFolders) == 0 {
 		a.localEmpty(c, "还没有添加本地音乐文件夹",
-			"添加存放音乐的文件夹后，Cloudy 会读取其中的 MP3 和 FLAC 文件（包括子文件夹），按歌手、专辑整理，文件夹有变化时自动更新。")
+			"添加存放音乐的文件夹后，迷一会儿 会读取其中的 MP3 和 FLAC 文件（包括子文件夹），按歌手、专辑整理，文件夹有变化时自动更新。")
 		return
 	}
 	tracks := a.lib.tracks

@@ -95,7 +95,7 @@ func TestTrayPopupCommands(t *testing.T) {
 	}
 	a.toggleTrayPopup()
 	tt.Frame()
-	if !tt.Focused("打开Cloudy") {
+	if !tt.Focused("打开" + mygo.App.Name()) {
 		t.Fatal("menu has no initial keyboard focus")
 	}
 	tt.Key(0, ui.KeyDown)

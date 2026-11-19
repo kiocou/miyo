@@ -27,14 +27,23 @@ func (a *app) loadCloud(again bool) {
 	if s.loading && again {
 		s.stale = true
 	}
-	if a.profile == nil || s.loading || (s.drive != nil && !again) {
+	if !a.sourceSignedIn() || s.loading || (s.drive != nil && !again) {
 		return
 	}
 	s.loading, s.err = true, ""
 	gen := a.accountGen
+	miguSrc := a.isMiguSource()
 	s.gen = gen
 	go func() {
-		drive, err := fetchCloud()
+		var (
+			drive *netease.CloudDrive
+			err   error
+		)
+		if miguSrc {
+			drive, err = miguCloudSongs()
+		} else {
+			drive, err = fetchCloud()
+		}
 		a.post(func() {
 			if a.accountGen != gen {
 				return
@@ -47,6 +56,9 @@ func (a *app) loadCloud(again bool) {
 			if err != nil {
 				s.err = "无法读取音乐云盘，请检查网络后重试"
 				return
+			}
+			if drive != nil {
+				a.rememberMiguTracks(drive.Songs)
 			}
 			s.drive = drive
 		})
@@ -71,8 +83,12 @@ func cloudUsage(d *netease.CloudDrive) string {
 // which play whole whatever their rights: those taken down, or for VIPs.
 func (a *app) cloudPage(c *ui.Context) {
 	s := &a.cloud
-	if a.profile == nil {
-		a.centered(c, "登录后可以播放上传到网易云音乐云盘的歌曲", nil)
+	if !a.sourceSignedIn() {
+		msg := "登录后可以播放上传到网易云音乐云盘的歌曲"
+		if a.isMiguSource() {
+			msg = "登录咪咕账号后可以查看和播放咪咕云盘歌曲"
+		}
+		a.centered(c, msg, nil)
 		return
 	}
 	a.loadCloud(false)

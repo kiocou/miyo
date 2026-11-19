@@ -61,6 +61,5 @@ func (a *app) playOpenedFiles() {
 	})
 }
 
-// appIdentifier is Cloudy's identifier, as mygo.json says: kept from when it
-// was Cloud-nya, which its data and registrations are under.
-const appIdentifier = "io.github.nya-owo.cloud-nya"
+// appIdentifier is the app's bundle/system identifier matching mygo.json.
+const appIdentifier = "io.github.kiocou.miyo"

@@ -68,7 +68,7 @@ func (a *app) applyTray() {
 		if runtime.GOOS == "windows" {
 			menu = nil // Right click belongs to the independent native-UI flyout.
 		}
-		t, err := mygo.NewTray(mygo.TrayOptions{ID: "cloudmusic", Icon: icon, IconIsTemplate: template, ToolTip: mygo.App.Name(), Menu: menu})
+		t, err := mygo.NewTray(mygo.TrayOptions{ID: "miyo", Icon: icon, IconIsTemplate: template, ToolTip: mygo.App.Name(), Menu: menu})
 		if err != nil {
 			log.Println("tray:", err)
 			return

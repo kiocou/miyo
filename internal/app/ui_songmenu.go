@@ -19,9 +19,9 @@ var copyText = func(text string) error { return mygo.Clipboard.Write(transfer.Te
 // or album's, and, signed in, adding it to a playlist or taking it out of
 // pid, the playlist it is listed in, if set.
 func (a *app) songActions(tr *netease.Track, pid int64) [][]menuAction {
-	// A file put in the folder by hand is no NetEase song: only its file
-	// can be acted on. A downloaded song is still one, with its file too.
-	if tr.LocalPath != "" && tr.ID <= 0 {
+	// A file put in the folder by hand is no catalog song: only its file
+	// can be acted on. A downloaded song retains its catalog menu too.
+	if tr.LocalPath != "" && tr.ID <= 0 && tr.Source == "" {
 		return a.withCoverAction(a.downloadedSongActions(tr), tr)
 	}
 	// The list can move under the menu; the song it names cannot.
@@ -41,13 +41,16 @@ func (a *app) songActions(tr *netease.Track, pid int64) [][]menuAction {
 			a.startDownload(song)
 		}}
 	}
+	copyGroup := []menuAction{
+		{label: "复制歌名", icon: iconCopy, do: func() { copyText(tr.Name) }},
+		{label: "复制歌名和歌手", icon: iconCopy, do: func() { copyText(tr.Name + " - " + tr.ArtistNames()) }},
+	}
+	if link := tr.URL(); link != "" {
+		copyGroup = append(copyGroup, menuAction{label: "复制链接", icon: iconLink, do: func() { copyText(link) }})
+	}
 	groups := [][]menuAction{
 		{next},
-		{
-			{label: "复制歌名", icon: iconCopy, do: func() { copyText(tr.Name) }},
-			{label: "复制歌名和歌手", icon: iconCopy, do: func() { copyText(tr.Name + " - " + tr.ArtistNames()) }},
-			{label: "复制链接", icon: iconLink, do: func() { copyText(tr.URL()) }},
-		},
+		copyGroup,
 	}
 	if tr.LocalPath != "" {
 		groups = append(groups, []menuAction{
@@ -60,17 +63,18 @@ func (a *app) songActions(tr *netease.Track, pid int64) [][]menuAction {
 		files = append(files, a.coverAction(tr))
 	}
 	groups = append(groups, files)
-	// Its artists' and album's pages, those NetEase has.
+	// Its artists' and album's pages, those the catalog has.
 	var pages []menuAction
 	for _, ar := range tr.Artists {
 		if ar.ID != 0 {
-			pages = append(pages, menuAction{label: "查看歌手：" + ar.Name, title: ar.Name, note: "歌手", icon: iconUser,
-				do: func() { a.openArtist(ar.ID) }})
+			artist := ar
+			pages = append(pages, menuAction{label: "查看歌手：" + artist.Name, title: artist.Name, note: "歌手", icon: iconUser,
+				do: func() { a.openPage(route{page: pageArtist, id: artist.ID, source: artist.Source, sourceID: artist.SourceID}) }})
 		}
 	}
 	if tr.Album.ID != 0 {
 		pages = append(pages, menuAction{label: "查看专辑：" + tr.Album.Name, title: tr.Album.Name, note: "专辑", icon: iconAlbum,
-			do: func() { a.openPage(route{page: pageAlbum, id: tr.Album.ID}) }})
+			do: func() { a.openPage(route{page: pageAlbum, id: tr.Album.ID, source: tr.Album.Source, sourceID: tr.Album.SourceID}) }})
 	}
 	if len(pages) > 0 {
 		groups = append(groups, pages)
@@ -143,8 +147,13 @@ func (a *app) songMenuLabeled(c *ui.Context, tr *netease.Track, size float32, co
 	b := iconButton(c, iconMore, size, color, label)
 	if b.Clicked() {
 		// The details of what plays, which the sound effects shape too.
-		fx := menuAction{label: "音效", icon: iconWave, note: a.effectsNote(), do: a.openEffects}
-		groups := append([][]menuAction{{fx}}, extra...)
+		first := []menuAction{{label: "音效", icon: iconWave, note: a.effectsNote(), do: a.openEffects}}
+		if tr.ProgramID == 0 && tr.LocalPath == "" {
+			a.ensureTrackQualityMetadata(tr)
+			qLabel, _ := a.activeQualityBadge(tr, a.pl.Stream())
+			first = append(first, menuAction{label: "切换音质", icon: iconSparkles, note: qLabel, sub: a.qualityMenuGroups(tr, a.pl.Stream())})
+		}
+		groups := append([][]menuAction{first}, extra...)
 		a.menuBelow(b, true, append(groups, a.songActions(tr, 0)...), a.songHead(tr))
 	}
 	return b
@@ -166,10 +175,10 @@ func (a *app) compactPlayerActions(tr *netease.Track) []menuAction {
 		{label: "迷你窗口", icon: iconMiniWin, do: a.showMini},
 	}
 	// Signed in, the song actions already have the playlist submenu.
-	if a.profile == nil && tr.ProgramID == 0 && tr.ID > 0 {
+	if !a.signedInForTrack(tr) && tr.ProgramID == 0 && (tr.ID > 0 || tr.Source == "migu") {
 		actions = append(actions, menuAction{label: "添加到歌单", icon: iconListPlus, do: func() {
 			a.toast = "登录后才能添加到歌单"
-			a.openLogin()
+			a.openLoginFor(tr.Source)
 		}})
 	}
 	return actions

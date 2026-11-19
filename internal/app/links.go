@@ -12,11 +12,9 @@ var updateMirrors = []string{
 	"https://ghfast.top/",
 }
 
-// manualDownloadURL is the cloud drive share of the installers, offered
-// when an update cannot be fetched at all: the author's Quark folder, which
-// each release's installers are put in, the link and its code the same.
-var manualDownloadURL = "https://pan.quark.cn/s/58e05deef9f6?pwd=zBds"
+// manualDownloadURL can point to a fallback mirror/cloud drive share when
+// GitHub releases cannot be reached directly.
+var manualDownloadURL = ""
 
-// feedbackBilibiliUID is the author's Bilibili account, whose private
-// messages feedback goes to.
-var feedbackBilibiliUID int64 = 229474180
+// feedbackBilibiliUID can point to a maintainer's Bilibili UID for direct feedback.
+var feedbackBilibiliUID int64 = 0

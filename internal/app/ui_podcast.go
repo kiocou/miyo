@@ -138,7 +138,7 @@ func (a *app) toggleSubscribe(d *podcastData) {
 		return
 	}
 	if a.profile == nil {
-		a.openLogin()
+		a.openLoginFor("")
 		return
 	}
 	pod := d.podcast

@@ -247,6 +247,23 @@ type settings struct {
 	// keeping how they were, to put back as it is turned off again.
 	PowerSaver  bool          `json:"powerSaver,omitempty"`
 	SaverBefore *savedEffects `json:"saverBefore,omitempty"`
+	// AudioSource selects the active primary catalog/account source: "" or
+	// "netease" for NetEase Cloud Music, "migu" for Migu Music.
+	AudioSource string `json:"audioSource,omitempty"`
+	// MiguFallback optionally unblocks unplayable/VIP-preview NetEase songs
+	// using Migu Music streams. Off by default so the two sources stay independent.
+	MiguFallback bool `json:"miguFallback"`
+	// MiguSearch shows a NetEase/Migu catalog switcher in the search view.
+	MiguSearch bool `json:"miguSearch"`
+	// MiguCookie holds an optional Migu cookie string or pacmtoken.
+	MiguCookie string `json:"miguCookie,omitempty"`
+	// MiguUser caches the signed-in Migu nickname for display in settings.
+	MiguUser string `json:"miguUser,omitempty"`
+	// MiguAvatar caches the signed-in Migu avatar URL.
+	MiguAvatar string `json:"miguAvatar,omitempty"`
+	// MiguQuality picks the preferred Migu tier ("ZQ32", "ZQ24", "AV3A",
+	// "Z3D", "SQ", "HQ", "PQ", "LQ"); empty follows Quality.
+	MiguQuality string `json:"miguQuality,omitempty"`
 
 	path string // where they were loaded from, and are saved to
 	// loaded is whether they came from a file: the app ran here before.
@@ -254,7 +271,7 @@ type settings struct {
 }
 
 func defaultSettings() settings {
-	return settings{UpdateChecks: true, BarSpin: true, GlobalKeys: true, NotchActivity: true, Quality: "exhigh", Appearance: "system", LiquidGlass: true, SidebarGlass: true, MainGlass: true, NpLight: true, GlowLevel: 0.5, GlassClear: 0.6, GlassBend: 0.3, GlassPanels: true, Volume: 0.8, Normalize: true, AppIcon: "dock-and-menubar", CacheMB: 2048, Captions: true, LyricTrans: true, LyricBlur: true, NpCalm: true, LyricBlurLevel: 0.5, MoreWords: true, LyricTilt: 0.5, LyricBounce: 0.5, DeskWords: true}
+	return settings{UpdateChecks: true, BarSpin: true, GlobalKeys: true, NotchActivity: true, Quality: "exhigh", Appearance: "system", LiquidGlass: true, SidebarGlass: true, MainGlass: true, NpLight: true, GlowLevel: 0.5, GlassClear: 0.6, GlassBend: 0.3, GlassPanels: true, Volume: 0.8, Normalize: true, AppIcon: "dock-and-menubar", CacheMB: 2048, Captions: true, LyricTrans: true, LyricBlur: true, NpCalm: true, LyricBlurLevel: 0.5, MoreWords: true, LyricTilt: 0.5, LyricBounce: 0.5, DeskWords: true, MiguFallback: false, MiguSearch: true}
 }
 
 func (s settings) playerGlass() bool  { return !s.PowerSaver && (s.GlobalGlass || s.LiquidGlass) }

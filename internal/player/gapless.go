@@ -11,6 +11,7 @@ import (
 
 	"netease-music-mygo/internal/local"
 	"netease-music-mygo/internal/lyrics"
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -114,6 +115,13 @@ func (p *Player) level() string {
 func fetchLyrics(t netease.Track) []lyrics.Line {
 	var lines []lyrics.Line
 	var err error = errNoLyrics
+	if t.Source == migu.Source {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if l, _, lerr := migu.Lyrics(ctx, t.SourceID, t.LrcURL, t.TrcURL, t.MrcURL); lerr == nil && len(l) > 0 {
+			return l
+		}
+	}
 	if t.ID > 0 {
 		var lrc, trans, yrc string
 		if lrc, trans, yrc, err = lyricsOf(t.ID); err == nil {
@@ -139,7 +147,7 @@ var MoreWords func(t netease.Track) []lyrics.Line
 // wantsMoreWords reports whether lines of t are timed only by line, their
 // words running at one pace, and so worth looking for elsewhere.
 func wantsMoreWords(t netease.Track, lines []lyrics.Line) bool {
-	return MoreWords != nil && t.ID > 0 && t.ProgramID == 0 && len(lines) > 0 && !lyrics.IsPlain(lines) && !anyTimed(lines)
+	return MoreWords != nil && (t.ID > 0 || t.Source == migu.Source) && t.ProgramID == 0 && len(lines) > 0 && !lyrics.IsPlain(lines) && !anyTimed(lines)
 }
 
 func anyTimed(lines []lyrics.Line) bool {

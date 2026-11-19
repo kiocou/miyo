@@ -3,11 +3,13 @@ package app
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -35,9 +37,9 @@ type commentDraft struct {
 	armedTill time.Time
 }
 
-// commentable reports whether tr is a song with comments at NetEase.
+// commentable reports whether tr is a song with comments.
 func commentable(tr *netease.Track) bool {
-	return tr.ID > 0
+	return tr.ID > 0 || tr.Source == migu.Source
 }
 
 // commentComposer is the field to write a comment in, over the comments,
@@ -54,18 +56,26 @@ func (a *app) commentComposer(c *ui.Context, tr *netease.Track) {
 	over := n > commentLimit
 	ui.Row(c.Key("compose")).Margin(4, 8, 6, 12).Padding(4, 4, 4, 16).Gap(8).Radius(999).AlignItems(ui.Center).
 		Background(white.Alpha(0.08)).Border(1, white.Alpha(0.1)).Children(func() {
-		if a.profile == nil {
+		if !a.signedInForTrack(tr) {
 			b := ui.ButtonBase(c.Key("compose-login")).Grow(1).Height(32).AlignItems(ui.Center).FocusRing(false).Label("登录后发表评论")
 			b.Children(func() {
-				ui.Text(c, "登录后发表评论，评论会同步到网易云音乐").FontSize(13).TextColor(white.Alpha(0.5))
+				msg := "登录后发表评论，评论会同步到网易云音乐"
+				if tr.Source == migu.Source {
+					msg = "登录咪咕账号后即可发表评论"
+				}
+				ui.Text(c, msg).FontSize(13).TextColor(white.Alpha(0.5))
 			})
 			if b.Clicked() {
-				a.openLogin()
+				a.openLoginFor(tr.Source)
 			}
 			return
 		}
+		ph := "说点什么，评论会同步到网易云音乐"
+		if tr.Source == migu.Source {
+			ph = "说点什么，发表咪咕音乐评论"
+		}
 		in := ui.TextInputBase(c.Key("compose-input"), &d.text).Bind(&d.box).Grow(1).MinWidth(0).
-			Placeholder("说点什么，评论会同步到网易云音乐").FontSize(13.5).TextColor(white).Label("发表评论")
+			Placeholder(ph).FontSize(13.5).TextColor(white).Label("发表评论")
 		if n > 0 {
 			fg := white.Alpha(0.4)
 			if over {
@@ -101,7 +111,15 @@ func (a *app) sendComment(tr *netease.Track) {
 	thread, text, id := cs.thread, d.text, tr.ID
 	d.sending = true
 	go func() {
-		cm, err := addComment(thread, text)
+		var (
+			cm  *netease.Comment
+			err error
+		)
+		if mid, rtype, ok := migu.ParseCommentThread(thread); ok {
+			cm, err = miguAddComment(mid, rtype, text)
+		} else {
+			cm, err = addComment(thread, text)
+		}
 		a.post(func() {
 			if d.track == id {
 				d.sending = false
@@ -113,18 +131,24 @@ func (a *app) sendComment(tr *netease.Track) {
 			if d.track == id {
 				d.text = ""
 			}
-			a.say("comment", "评论已发送，已同步到网易云音乐")
+			if _, _, ok := migu.ParseCommentThread(thread); ok {
+				a.say("comment", "评论已发送")
+			} else {
+				a.say("comment", "评论已发送，已同步到网易云音乐")
+			}
 			if cs.thread != thread {
 				return
 			}
 			if cm.ID == 0 || cm.Content == "" {
-				// NetEase took it but said nothing of it: load them again.
+				// Server took it but said nothing of it: load them again.
 				*cs = commentState{track: tr.ID, thread: thread}
 				a.loadComments()
 				return
 			}
-			if cm.User.ID == 0 && a.profile != nil {
+			if cm.User.ID == 0 && a.profile != nil && tr.Source != migu.Source {
 				cm.User.ID, cm.User.Nickname, cm.User.AvatarURL = a.profile.UserID, a.profile.Nickname, a.profile.AvatarURL
+			} else if tr.Source == migu.Source && cm.User.Nickname == "" {
+				cm.User.Nickname, cm.User.AvatarURL = firstNonEmptyStr(a.settings.MiguUser, "咪咕音乐用户"), a.settings.MiguAvatar
 			}
 			if cm.Time == 0 {
 				cm.Time = time.Now().UnixMilli()
@@ -191,7 +215,12 @@ func (a *app) removeComment(id int64) {
 		}
 	}
 	go func() {
-		err := deleteComment(thread, id)
+		var err error
+		if _, _, ok := migu.ParseCommentThread(thread); ok {
+			err = miguDeleteComment(strconv.FormatInt(id, 10))
+		} else {
+			err = deleteComment(thread, id)
+		}
 		a.post(func() {
 			if err == nil {
 				a.say("comment", "评论已删除")

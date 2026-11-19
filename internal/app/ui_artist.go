@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -26,7 +27,7 @@ func (a *app) artistLinks(c *ui.Context, tr *netease.Track, color, hover ui.Colo
 			case tr.PodcastID != 0:
 				a.link(c.Key(i), ar.Name, color, hover, podcast)
 			case ar.ID != 0:
-				a.link(c.Key(i), ar.Name, color, hover, route{page: pageArtist, id: ar.ID})
+				a.link(c.Key(i), ar.Name, color, hover, route{page: pageArtist, id: ar.ID, source: ar.Source, sourceID: ar.SourceID})
 			default:
 				ui.Text(c, ar.Name)
 			}
@@ -37,7 +38,7 @@ func (a *app) artistLinks(c *ui.Context, tr *netease.Track, color, hover ui.Colo
 			case tr.PodcastID != 0:
 				a.link(c.Key("album"), tr.Album.Name, color, hover, podcast)
 			case tr.Album.ID != 0:
-				a.link(c.Key("album"), tr.Album.Name, color, hover, route{page: pageAlbum, id: tr.Album.ID})
+				a.link(c.Key("album"), tr.Album.Name, color, hover, route{page: pageAlbum, id: tr.Album.ID, source: tr.Album.Source, sourceID: tr.Album.SourceID})
 			default:
 				ui.Text(c, tr.Album.Name)
 			}
@@ -80,6 +81,8 @@ var (
 // most popular songs, and their newest songs, albums and events once
 // asked for.
 type artistData struct {
+	source        string
+	sourceID      string
 	profile       *netease.ArtistProfile
 	loading       bool
 	err           string
@@ -138,13 +141,31 @@ func (a *app) loadArtist(id int64) {
 		return
 	}
 	d.loading, d.err = true, ""
+	src, srcID := d.source, d.sourceID
+	if src == "" && srcID == "" {
+		if sid := a.migu.artistSource[id]; sid != "" {
+			src, srcID = migu.Source, sid
+			d.source, d.sourceID = src, srcID
+		}
+	}
 	go func() {
-		ar, err := artistDetail(id)
+		var (
+			ar  *netease.ArtistProfile
+			err error
+		)
+		if src == migu.Source && srcID != "" {
+			ar, err = migu.ArtistDetail(srcID)
+		} else {
+			ar, err = artistDetail(id)
+		}
 		a.post(func() {
 			d.loading = false
 			if err != nil {
 				d.err = "歌手加载失败"
 				return
+			}
+			if ar != nil {
+				a.rememberMiguTracks(ar.Songs)
 			}
 			d.profile = ar
 			// Their events are their account's, which their profile names.
@@ -182,8 +203,22 @@ func (a *app) loadAlbums(id int64) {
 	}
 	d.albumsPage.loading, d.albumsPage.err = true, ""
 	offset := len(d.albums)
+	src, srcID := d.source, d.sourceID
+	name := ""
+	if d.profile != nil {
+		name = d.profile.Name
+	}
 	go func() {
-		albums, more, err := albumsBy(id, albumsPage, offset)
+		var (
+			albums []netease.AlbumProfile
+			more   bool
+			err    error
+		)
+		if src == migu.Source && srcID != "" {
+			albums, more, err = migu.ArtistAlbums(srcID, name, albumsPage, offset)
+		} else {
+			albums, more, err = albumsBy(id, albumsPage, offset)
+		}
 		a.post(func() {
 			d.albumsPage.loading = false
 			if err != nil {
@@ -232,21 +267,32 @@ func (a *app) toggleFollow(id int64) {
 	if d.profile == nil || d.following {
 		return
 	}
-	if a.profile == nil {
-		a.openLogin()
+	isMigu := d.source == migu.Source || d.profile.Source == migu.Source
+	signedIn := a.profile != nil
+	if isMigu {
+		signedIn = migu.HasCookie()
+	}
+	if !signedIn {
+		a.openLoginFor(d.profile.Source)
 		return
 	}
 	ar := d.profile
 	follow := !ar.Followed
 	ar.Followed, d.following = follow, true
+	srcID := firstNonEmptyStr(d.sourceID, ar.SourceID)
 	go func() {
-		err := followArtist(id, follow)
+		var err error
+		if isMigu && srcID != "" {
+			err = miguFollowArtist(srcID, follow)
+		} else {
+			err = followArtist(id, follow)
+		}
 		a.post(func() {
 			d.following = false
 			switch {
 			case err != nil:
 				ar.Followed = !follow
-				a.toast = "操作失败，请稍后再试"
+				a.toast = miguOpFailMessage(err, "操作失败，请稍后再试")
 			case follow:
 				a.say("follow", "已关注")
 			default:
@@ -384,6 +430,25 @@ func (a *app) artistHeader(c *ui.Context, d *artistData) {
 		})
 	})
 	ui.Row(c).AlignItems(ui.Center).Margin(34, 0, 14, 0).Children(func() {
+		if ar.Source == migu.Source {
+			tab := 0
+			if a.artistTab == artistAlbums {
+				tab = 1
+			} else if a.artistTab != artistHot {
+				a.artistTab = artistHot
+			}
+			ui.Text(c, artistTabTitles[a.artistTab]).FontSize(19).FontWeight(700).LetterSpacing(-0.3)
+			ui.Spacer(c)
+			if a.segmented(c.Key("tab"), &tab, "热门", "专辑") {
+				if tab == 1 {
+					a.artistTab = artistAlbums
+				} else {
+					a.artistTab = artistHot
+				}
+				a.loadArtist(ar.ID)
+			}
+			return
+		}
 		ui.Text(c, artistTabTitles[a.artistTab]).FontSize(19).FontWeight(700).LetterSpacing(-0.3)
 		ui.Spacer(c)
 		if a.segmented(c.Key("tab"), &a.artistTab, "热门", "最新", "专辑", "动态") {

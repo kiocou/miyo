@@ -7,8 +7,11 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
+
+var miguSearchSuggest = migu.SearchSuggest
 
 // suggestDelay is how long typing pauses before suggestions are asked for.
 const suggestDelay = 220 * time.Millisecond
@@ -39,7 +42,19 @@ func (a *app) suggest(q string) {
 	}
 	a.dismissSuggestions()
 	s.query, s.loading = q, true
+	useMigu := a.isMiguSource()
 	s.timer = time.AfterFunc(suggestDelay, func() {
+		if useMigu {
+			words, err := miguSearchSuggest(q)
+			a.post(func() {
+				if q != s.query {
+					return
+				}
+				s.timer, s.loading, s.failed = nil, false, err != nil
+				s.items = miguSuggestionList(words)
+			})
+			return
+		}
 		res, err := searchSuggest(q)
 		a.post(func() {
 			// Typed on, or searched since.
@@ -50,6 +65,22 @@ func (a *app) suggest(q string) {
 			s.items = suggestionList(res)
 		})
 	})
+}
+
+func miguSuggestionList(words []string) []suggestion {
+	out := make([]suggestion, 0, min(len(words), 10))
+	for _, w := range words {
+		if len(out) >= 10 {
+			break
+		}
+		out = append(out, suggestion{
+			key:   "migu:" + w,
+			name:  w,
+			kind:  "咪咕搜索",
+			route: route{page: pageSearch, query: w, kind: netease.SearchSongs, source: migu.Source},
+		})
+	}
+	return out
 }
 
 func (a *app) dismissSuggestions() {
@@ -102,8 +133,12 @@ func (a *app) searchField(c *ui.Context) {
 	field.Children(func() {
 		ui.Icon(c, iconSearch).Size(14, 14).TextColor(p.muted)
 		cb := ui.ComboboxBase(c.Key("search"), &a.query)
+		placeholder := "搜索歌曲、歌手、播客"
+		if a.isMiguSource() {
+			placeholder = "搜索咪咕歌曲、歌手、专辑"
+		}
 		in := cb.Input.Bind(&a.searchBox).Grow(1).MinWidth(0).
-			Placeholder("搜索歌曲、歌手、播客").FontSize(13).Label("搜索")
+			Placeholder(placeholder).FontSize(13).Label("搜索")
 		q := strings.TrimSpace(a.query)
 		s := &a.suggestions
 		switch {

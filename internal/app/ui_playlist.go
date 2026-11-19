@@ -329,13 +329,35 @@ func (a *app) playList(tracks []netease.Track, shuffled bool) {
 	if shuffled {
 		// Shuffled, from any song that plays: not always the first.
 		a.pl.SetMode(player.ModeShuffle)
-		a.pl.PlayQueue(tracks, randomPlayable(tracks))
+		a.pl.PlayQueue(tracks, a.randomPlayableIndex(tracks))
 		return
 	}
 	if a.pl.Shuffle() {
 		a.pl.ToggleShuffle()
 	}
-	a.pl.PlayQueue(tracks, firstPlayable(tracks))
+	a.pl.PlayQueue(tracks, a.firstPlayableIndex(tracks))
+}
+
+func (a *app) firstPlayableIndex(tracks []netease.Track) int {
+	for i := range tracks {
+		if a.canPlayTrack(&tracks[i]) {
+			return i
+		}
+	}
+	return 0
+}
+
+func (a *app) randomPlayableIndex(tracks []netease.Track) int {
+	var ok []int
+	for i := range tracks {
+		if a.canPlayTrack(&tracks[i]) {
+			ok = append(ok, i)
+		}
+	}
+	if len(ok) == 0 {
+		return 0
+	}
+	return ok[rand.IntN(len(ok))]
 }
 
 // randomPlayable returns where a song that plays is in tracks, picked at

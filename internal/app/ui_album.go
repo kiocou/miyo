@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -15,9 +16,11 @@ var albumDetail = netease.AlbumDetail
 
 // albumData is what the app has of an album.
 type albumData struct {
-	album   *netease.AlbumProfile
-	loading bool
-	err     string
+	source   string
+	sourceID string
+	album    *netease.AlbumProfile
+	loading  bool
+	err      string
 }
 
 func (a *app) loadAlbum(id int64) {
@@ -30,13 +33,31 @@ func (a *app) loadAlbum(id int64) {
 		return
 	}
 	d.loading, d.err = true, ""
+	src, srcID := d.source, d.sourceID
+	if src == "" && srcID == "" {
+		if sid := a.migu.albumSource[id]; sid != "" {
+			src, srcID = migu.Source, sid
+			d.source, d.sourceID = src, srcID
+		}
+	}
 	go func() {
-		al, err := albumDetail(id)
+		var (
+			al  *netease.AlbumProfile
+			err error
+		)
+		if src == migu.Source && srcID != "" {
+			al, err = migu.AlbumDetail(srcID)
+		} else {
+			al, err = albumDetail(id)
+		}
 		a.post(func() {
 			d.loading = false
 			if err != nil {
 				d.err = "专辑加载失败"
 				return
+			}
+			if al != nil {
+				a.rememberMiguTracks(al.Songs)
 			}
 			d.album = al
 		})
@@ -70,7 +91,7 @@ func (a *app) albumHeader(c *ui.Context, al *netease.AlbumProfile) {
 					if i > 0 {
 						ui.Text(c, ", ")
 					}
-					a.link(c.Key(i), ar.Name, p.muted, p.text, route{page: pageArtist, id: ar.ID})
+					a.link(c.Key(i), ar.Name, p.muted, p.text, route{page: pageArtist, id: ar.ID, source: ar.Source, sourceID: ar.SourceID})
 				}
 				meta := fmt.Sprintf(" · %d 首", len(al.Songs))
 				if al.PublishTime > 0 {
@@ -137,7 +158,7 @@ func (a *app) albumCard(c *ui.Context, al *netease.AlbumProfile) ui.Element {
 	})
 	if card.Clicked() {
 		a.flyFrom(c, al.PicURL, artAt, 14)
-		a.open(route{page: pageAlbum, id: al.ID})
+		a.open(route{page: pageAlbum, id: al.ID, source: al.Source, sourceID: al.SourceID})
 	}
 	return card
 }

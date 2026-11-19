@@ -53,10 +53,10 @@ func (a *app) queueRows(c *ui.Context, list *ui.ListState, at *int, look queueLo
 				add.Background(look.hover)
 			}
 			if add.Clicked() {
-				if a.profile == nil {
+				if !a.sourceSignedIn() {
 					a.more.queue.open = false
 					a.toast = "登录后才能添加歌单"
-					a.openLogin()
+					a.openLoginFor(a.activeSource())
 				} else {
 					a.queueAdding = !a.queueAdding
 				}
@@ -87,7 +87,8 @@ func (a *app) queueRows(c *ui.Context, list *ui.ListState, at *int, look queueLo
 		case row.Hovered():
 			row.Background(look.hover)
 		}
-		if !tr.Playable() {
+		playable := a.canPlayTrack(tr)
+		if !playable {
 			row.Opacity(0.4)
 		}
 		row.Children(func() {
@@ -109,7 +110,7 @@ func (a *app) queueRows(c *ui.Context, list *ui.ListState, at *int, look queueLo
 				}
 			})
 		})
-		if row.Clicked() && tr.Playable() && !playing {
+		if row.Clicked() && playable && !playing {
 			pl.Jump(i)
 		}
 	}).Grow(1).Padding(8, 0, 40, 0).Gap(2)
@@ -206,7 +207,7 @@ func (a *app) queueEmpty(c *ui.Context, ink paneInk) {
 // ownLists is the listener's own playlists, the liked songs first, each
 // with the name the queue shows it by.
 func (a *app) ownLists() (lists []*netease.Playlist, names []string) {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		return nil, nil
 	}
 	for i := range a.mine {
@@ -226,7 +227,7 @@ func (a *app) ownLists() (lists []*netease.Playlist, names []string) {
 // they add one to the queue: the liked songs first, then the others; the
 // one chosen goes onto the end of the queue, and the drawer closes.
 func (a *app) queueAddDrawer(c *ui.Context, look queueLook) {
-	drawer(c, "queue-add", a.queueAdding && a.profile != nil, func() {
+	drawer(c, "queue-add", a.queueAdding && a.sourceSignedIn(), func() {
 		lists, names := a.ownLists()
 		ui.Column(c).Padding(2, 6, 8, 6).Gap(2).Children(func() {
 			ui.Text(c, "添加歌单到播放列表").FontSize(12).FontWeight(600).TextColor(look.head).Margin(2, 0, 4, 6)

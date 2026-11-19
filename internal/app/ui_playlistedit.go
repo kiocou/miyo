@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -61,16 +62,27 @@ func (a *app) isSaved(pl *netease.Playlist) bool {
 // savable reports whether the listener may save playlist pl: anyone's but
 // their own. Signed out, saving asks them to sign in.
 func (a *app) savable(pl *netease.Playlist) bool {
+	if pl.Source == migu.Source {
+		return pl.SourceID != "" && !strings.HasPrefix(pl.SourceID, "rank:")
+	}
+	if pl.Source != "" {
+		return false
+	}
 	return a.profile == nil || pl.Creator.UserID != a.profile.UserID
 }
 
 // toggleSaved saves playlist pl for the listener, or unsaves it, at once
-// in the app and then with NetEase, going back if NetEase refuses. Signed
+// in the app and then with NetEase or Migu, going back if refused. Signed
 // out, it asks the listener to sign in.
 func (a *app) toggleSaved(pl netease.Playlist) {
-	if a.profile == nil {
+	isMigu := pl.Source == migu.Source
+	signedIn := a.profile != nil
+	if isMigu {
+		signedIn = migu.HasCookie()
+	}
+	if !signedIn {
 		a.showMain()
-		a.openLogin()
+		a.openLoginFor(pl.Source)
 		return
 	}
 	id := pl.ID
@@ -83,17 +95,22 @@ func (a *app) toggleSaved(pl netease.Playlist) {
 	a.savingPl[id] = true
 	save := !a.isSaved(&pl)
 	at := a.setSaved(pl, save, 0)
-	uid := a.profile.UserID
+	uid := a.activeUserID()
 	go func() {
-		err := savePlaylist(id, save)
+		var err error
+		if isMigu {
+			err = miguSubscribePlaylist(pl.SourceID, save)
+		} else {
+			err = savePlaylist(id, save)
+		}
 		a.post(func() {
 			delete(a.savingPl, id)
 			switch {
-			case a.profile == nil || a.profile.UserID != uid:
+			case a.activeUserID() != uid && !(isMigu && migu.HasCookie()):
 				// Signed out or in as someone else meanwhile.
 			case err != nil:
 				a.setSaved(pl, !save, max(at, 0))
-				a.toast = "操作失败，请稍后再试"
+				a.toast = miguOpFailMessage(err, "操作失败，请稍后再试")
 			case save:
 				a.say("save-playlist", "已收藏")
 			default:
@@ -127,34 +144,45 @@ func (a *app) setSaved(pl netease.Playlist, save bool, at int) int {
 
 // loadMine loads the playlists the listener uid made and saved.
 func (a *app) loadMine(uid int64) {
+	miguSrc := a.isMiguSource()
 	go func() {
-		made, saved, err := netease.UserPlaylists(uid)
+		var (
+			made, saved []netease.Playlist
+			err         error
+		)
+		if miguSrc {
+			made, saved, err = miguUserPlaylists()
+		} else {
+			made, saved, err = netease.UserPlaylists(uid)
+		}
 		a.post(func() {
-			if err == nil && a.profile != nil && a.profile.UserID == uid {
+			if err == nil && a.activeUserID() == uid {
+				a.rememberMiguPlaylists(made)
+				a.rememberMiguPlaylists(saved)
 				a.mine, a.saved = made, saved
 			}
 		})
 	}()
 }
 
-// playlistChanged forgets what was loaded of playlist id, which NetEase
-// changed: loaded anew if shown, and the sidebar's covers with it.
+// playlistChanged forgets what was loaded of playlist id, which changed:
+// loaded anew if shown, and the sidebar's covers with it.
 func (a *app) playlistChanged(id int64) {
 	delete(a.playlists, id)
 	if a.route.page == pagePlaylist && a.route.id == id {
 		a.loadPlaylist(id, false)
 	}
-	if a.profile != nil {
-		a.loadMine(a.profile.UserID)
+	if a.sourceSignedIn() {
+		a.loadMine(a.activeUserID())
 	}
 }
 
 // newPlaylist asks for the name of a playlist to make, then adds tr to it
 // if set. Signed out, it asks the listener to sign in.
 func (a *app) newPlaylist(tr *netease.Track) {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		a.showMain()
-		a.openLogin()
+		a.openLoginFor(a.activeSource())
 		return
 	}
 	a.naming = nameDialog{open: true, add: tr}
@@ -190,9 +218,15 @@ func (a *app) submitName() {
 			return
 		}
 		old := pl.Name
+		plCopy := *pl
 		a.setPlaylistName(id, name)
 		go func() {
-			err := renamePlaylist(id, name)
+			var err error
+			if plCopy.Source == migu.Source && plCopy.SourceID != "" {
+				err = miguRenamePlaylist(plCopy.SourceID, name)
+			} else {
+				err = renamePlaylist(id, name)
+			}
 			a.post(func() {
 				if err != nil {
 					a.setPlaylistName(id, old)
@@ -204,8 +238,17 @@ func (a *app) submitName() {
 	}
 	d.busy = true
 	add, addAll := d.add, d.addAll
+	miguSrc := a.isMiguSource()
 	go func() {
-		pl, err := createPlaylist(name)
+		var (
+			pl  *netease.Playlist
+			err error
+		)
+		if miguSrc {
+			pl, err = miguCreatePlaylist(name)
+		} else {
+			pl, err = createPlaylist(name)
+		}
 		a.post(func() {
 			a.naming.busy = false
 			if err != nil {
@@ -213,6 +256,7 @@ func (a *app) submitName() {
 				return
 			}
 			a.naming.open = false
+			a.rememberMiguPlaylist(*pl)
 			// Under the liked songs, as NetEase lists the newest.
 			at := 0
 			if len(a.mine) > 0 && a.mine[0].SpecialType == 5 {
@@ -221,7 +265,7 @@ func (a *app) submitName() {
 			a.mine = slices.Insert(a.mine, at, *pl)
 			pl.Tracks = nil
 			a.playlists[pl.ID] = pl
-			a.open(route{page: pagePlaylist, id: pl.ID})
+			a.open(route{page: pagePlaylist, id: pl.ID, source: pl.Source, sourceID: pl.SourceID})
 			if add != nil {
 				a.addTo(pl.ID, add)
 			}
@@ -261,7 +305,12 @@ func (a *app) deleteChosen() {
 		a.show(r)
 	}
 	go func() {
-		err := deletePlaylist(id)
+		var err error
+		if pl.Source == migu.Source && pl.SourceID != "" {
+			err = miguDeletePlaylist(pl.SourceID)
+		} else {
+			err = deletePlaylist(id)
+		}
 		a.post(func() {
 			if err != nil {
 				a.mine = slices.Insert(a.mine, min(i, len(a.mine)), pl)
@@ -285,9 +334,15 @@ func (a *app) setPlaylistName(id int64, name string) {
 
 // addTo adds tr to the listener's playlist pid; a toast says how it went.
 func (a *app) addTo(pid int64, tr *netease.Track) {
-	id := tr.ID
+	id, song := tr.ID, *tr
+	miguPlID := a.migu.playlistSource[pid]
 	go func() {
-		err := addToPlaylist(pid, id)
+		var err error
+		if song.Source == migu.Source && miguPlID != "" {
+			err = miguAddToPlaylist(miguPlID, firstNonEmptyStr(song.SourceID, song.CopyrightID, song.SongID))
+		} else {
+			err = addToPlaylist(pid, id)
+		}
 		a.post(func() {
 			switch {
 			case errors.Is(err, netease.ErrInPlaylist):
@@ -302,13 +357,12 @@ func (a *app) addTo(pid int64, tr *netease.Track) {
 	}()
 }
 
-// addableSongs are those of tracks a playlist can hold, once each: songs
-// of NetEase, not episodes or files of the computer.
+// addableSongs are those of tracks a playlist can hold, once each.
 func addableSongs(tracks []netease.Track) []int64 {
 	var ids []int64
 	seen := map[int64]bool{}
 	for _, t := range tracks {
-		if t.ID > 0 && t.ProgramID == 0 && !seen[t.ID] {
+		if (t.ID > 0 || t.Source == migu.Source) && t.ProgramID == 0 && !seen[t.ID] {
 			seen[t.ID] = true
 			ids = append(ids, t.ID)
 		}
@@ -319,6 +373,38 @@ func addableSongs(tracks []netease.Track) []int64 {
 // addAllTo adds tracks to the listener's playlist pid at once; a toast
 // says how it went.
 func (a *app) addAllTo(pid int64, tracks []netease.Track) {
+	miguPlID := a.migu.playlistSource[pid]
+	if miguPlID != "" {
+		var sids []string
+		seen := map[string]bool{}
+		for _, t := range tracks {
+			if t.Source == migu.Source {
+				if sid := firstNonEmptyStr(t.SourceID, t.CopyrightID, t.SongID); sid != "" && !seen[sid] {
+					seen[sid] = true
+					sids = append(sids, sid)
+				}
+			}
+		}
+		if len(sids) == 0 {
+			a.toast = "没有可以加入歌单的歌曲"
+			return
+		}
+		go func() {
+			err := miguAddToPlaylist(miguPlID, sids...)
+			a.post(func() {
+				switch {
+				case errors.Is(err, netease.ErrInPlaylist):
+					a.toast = "这些歌曲已在歌单中"
+				case err != nil:
+					a.toast = "添加失败，请稍后再试"
+				default:
+					a.toast = fmt.Sprintf("已添加 %d 首到歌单", len(sids))
+					a.playlistChanged(pid)
+				}
+			})
+		}()
+		return
+	}
 	ids := addableSongs(tracks)
 	if len(ids) == 0 {
 		a.toast = "没有可以加入歌单的歌曲"
@@ -343,9 +429,9 @@ func (a *app) addAllTo(pid int64, tracks []netease.Track) {
 // addAllMenu opens, under b, the listener's playlists tracks can all be
 // added to, and 新建歌单; signed out, it asks the listener to sign in.
 func (a *app) addAllMenu(b ui.Element, onDark bool, tracks []netease.Track) {
-	if a.profile == nil {
+	if !a.sourceSignedIn() {
 		a.toast = "登录后才能添加到歌单"
-		a.openLogin()
+		a.openLoginFor(a.activeSource())
 		return
 	}
 	tracks = slices.Clone(tracks)
@@ -364,9 +450,10 @@ func (a *app) addAllMenu(b ui.Element, onDark bool, tracks []netease.Track) {
 }
 
 // removeFrom takes tr out of the listener's playlist pid, at once in the
-// app and then with NetEase, which may refuse: the song comes back then.
+// app and then with NetEase or Migu, which may refuse: the song comes back then.
 func (a *app) removeFrom(pid int64, tr *netease.Track) {
-	id := tr.ID
+	id, song := tr.ID, *tr
+	miguPlID := a.migu.playlistSource[pid]
 	pl := a.playlists[pid]
 	var before []netease.Track
 	if pl != nil {
@@ -375,7 +462,12 @@ func (a *app) removeFrom(pid int64, tr *netease.Track) {
 		pl.Tracks = slices.DeleteFunc(slices.Clone(before), func(t netease.Track) bool { return t.ID == id })
 	}
 	go func() {
-		err := removeFromPlaylist(pid, id)
+		var err error
+		if song.Source == migu.Source && miguPlID != "" {
+			err = miguRemoveFromPlaylist(miguPlID, firstNonEmptyStr(song.SourceID, song.CopyrightID, song.SongID))
+		} else {
+			err = removeFromPlaylist(pid, id)
+		}
 		a.post(func() {
 			if err != nil {
 				if pl != nil && a.playlists[pid] == pl {
@@ -386,8 +478,8 @@ func (a *app) removeFrom(pid int64, tr *netease.Track) {
 			}
 			// The songs listed are right: only the sidebar's covers may
 			// have changed.
-			if a.profile != nil {
-				a.loadMine(a.profile.UserID)
+			if a.sourceSignedIn() {
+				a.loadMine(a.activeUserID())
 			}
 		})
 	}()
@@ -397,7 +489,7 @@ func (a *app) removeFrom(pid int64, tr *netease.Track) {
 // listener's playlists, or take it out of pid, the one it is listed in, if
 // set.
 func (a *app) playlistActions(tr *netease.Track, pid int64) []menuAction {
-	if a.profile == nil {
+	if !a.signedInForTrack(tr) || (!tr.IsNetEase() && tr.Source != migu.Source) {
 		return nil
 	}
 	var to []menuAction

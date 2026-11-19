@@ -96,10 +96,12 @@ func (s Store) Save(items []Item) error {
 // expected when that is known.
 type Progress func(done, total int64)
 
-// These let tests keep a download off the network.
+// These let tests keep a download off the network, or let the app plug in
+// alternative source resolution (e.g. Migu fallback / direct Migu tracks).
 var (
-	songURL = netease.SongURLContext
-	client  = &http.Client{Timeout: 2 * time.Hour}
+	songURL       = netease.SongURLContext
+	ResolveStream func(ctx context.Context, tr netease.Track, level string) (*netease.Stream, error)
+	client        = &http.Client{Timeout: 2 * time.Hour}
 )
 
 // Fetch downloads tr at level into dir, and returns what was saved. A file
@@ -111,7 +113,15 @@ func Fetch(ctx context.Context, tr netease.Track, level, dir string, progress Pr
 	if tr.ProgramID != 0 {
 		return Item{}, fmt.Errorf("播客节目不能作为歌曲下载")
 	}
-	st, err := songURL(ctx, tr.ID, level)
+	var (
+		st  *netease.Stream
+		err error
+	)
+	if ResolveStream != nil {
+		st, err = ResolveStream(ctx, tr, level)
+	} else {
+		st, err = songURL(ctx, tr.ID, level)
+	}
 	if err != nil {
 		return Item{}, err
 	}
@@ -152,6 +162,9 @@ func Fetch(ctx context.Context, tr netease.Track, level, dir string, progress Pr
 	}
 	req.Header.Set("User-Agent", netease.UserAgent)
 	req.Header.Set("Referer", "https://music.163.com/")
+	for k, v := range st.Headers {
+		req.Header.Set(k, v)
+	}
 	// The progress is of the file, not of a compressed stream of it.
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)

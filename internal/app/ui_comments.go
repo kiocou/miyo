@@ -2,12 +2,27 @@ package app
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
+
+func trackThread(tr *netease.Track) string {
+	if tr == nil {
+		return ""
+	}
+	if tr.Source == migu.Source {
+		if id := firstNonEmptyStr(tr.SourceID, tr.CopyrightID, tr.SongID); id != "" {
+			return "migu:" + id
+		}
+		return ""
+	}
+	return tr.Thread()
+}
 
 // These load a page of a thread's comments, and like a comment or unlike
 // it, with NetEase; tests replace them.
@@ -40,8 +55,12 @@ const commentPage = 30
 func (a *app) commentsFor(tr *netease.Track) *commentState {
 	cs := &a.comments
 	if cs.track != tr.ID {
-		*cs = commentState{track: tr.ID, thread: tr.Thread()}
-		a.loadComments()
+		*cs = commentState{track: tr.ID, thread: trackThread(tr)}
+		if cs.thread != "" {
+			a.loadComments()
+		} else {
+			cs.loaded = true
+		}
 	}
 	return cs
 }
@@ -49,13 +68,21 @@ func (a *app) commentsFor(tr *netease.Track) *commentState {
 // loadComments loads the next page of comments.
 func (a *app) loadComments() {
 	cs := &a.comments
-	if cs.loading {
+	if cs.loading || cs.thread == "" {
 		return
 	}
 	thread, offset := cs.thread, len(cs.latest)
 	cs.loading, cs.err = true, ""
 	go func() {
-		page, err := threadComments(thread, offset, commentPage)
+		var (
+			page *netease.Comments
+			err  error
+		)
+		if id, rtype, ok := migu.ParseCommentThread(thread); ok {
+			page, err = miguThreadComments(id, rtype, offset, commentPage)
+		} else {
+			page, err = threadComments(thread, offset, commentPage)
+		}
 		a.post(func() {
 			if cs.thread != thread {
 				return
@@ -305,18 +332,29 @@ func (a *app) commentLike(c *ui.Context, cm *netease.Comment) {
 // then with NetEase, which may refuse: it goes back then. Signed out, it
 // asks the listener to sign in.
 func (a *app) toggleCommentLike(id int64) {
-	if a.profile == nil {
-		a.openLogin()
+	cs := &a.comments
+	thread := cs.thread
+	if _, _, isMigu := migu.ParseCommentThread(thread); isMigu {
+		if !migu.HasCookie() {
+			a.openLoginFor(migu.Source)
+			return
+		}
+	} else if a.profile == nil {
+		a.openLoginFor("")
 		return
 	}
-	cs := &a.comments
-	thread, like := cs.thread, true
+	like := true
 	if cm := cs.find(id); cm != nil {
 		like = !cm.Liked
 	}
 	cs.setLiked(id, like)
 	go func() {
-		err := likeComment(thread, id, like)
+		var err error
+		if _, _, isMigu := migu.ParseCommentThread(thread); isMigu {
+			err = miguLikeComment(strconv.FormatInt(id, 10), like)
+		} else {
+			err = likeComment(thread, id, like)
+		}
 		a.post(func() {
 			if err != nil && cs.thread == thread {
 				cs.setLiked(id, !like)

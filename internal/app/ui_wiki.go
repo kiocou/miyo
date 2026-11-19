@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"netease-music-mygo/internal/migu"
 	"netease-music-mygo/internal/netease"
 )
 
@@ -27,13 +28,14 @@ type wikiState struct {
 	artistOpen map[int64]bool // the artists whose introductions show whole
 }
 
-// wikiShown reports whether tr has a wiki: a song of NetEase's.
+// wikiShown reports whether tr has a wiki: a song of NetEase or Migu.
 func wikiShown(tr *netease.Track) bool {
-	return tr != nil && tr.ID > 0 && tr.LocalPath == "" && tr.ProgramID == 0
+	return tr != nil && (tr.ID > 0 || tr.Source == migu.Source) && tr.LocalPath == "" && tr.ProgramID == 0
 }
 
 // wikiFor returns the wiki of tr, loading it the first time.
 func (a *app) wikiFor(tr *netease.Track) *wikiState {
+	a.rememberMiguTrack(*tr)
 	ws := &a.more.wiki
 	if ws.track != tr.ID {
 		*ws = wikiState{track: tr.ID}
@@ -49,8 +51,21 @@ func (a *app) loadWiki() {
 	}
 	id := ws.track
 	ws.loading, ws.err = true, ""
+	tr, isMigu := a.miguTrackByID(id)
 	go func() {
-		w, err := fetchSongWiki(id)
+		var (
+			w   *netease.SongWiki
+			res *migu.SongWikiResult
+			err error
+		)
+		if isMigu {
+			res, err = miguSongWikiOf(tr)
+			if res != nil {
+				w = res.Wiki
+			}
+		} else {
+			w, err = fetchSongWiki(id)
+		}
 		a.post(func() {
 			if ws.track != id {
 				return
@@ -60,14 +75,22 @@ func (a *app) loadWiki() {
 				ws.err = "百科加载失败"
 				return
 			}
+			if res != nil {
+				a.rememberMiguTracks(res.Similar)
+				a.rememberMiguPlaylists(res.Playlists)
+			}
 			ws.wiki = w
 		})
 	}()
 }
 
-// playSimilar plays a song the wiki says is like the one playing, once
-// NetEase has said what it is.
+// playSimilar plays a song the wiki says is like the one playing.
 func (a *app) playSimilar(s netease.WikiSong) {
+	if tr, ok := a.miguTrackByID(s.ID); ok {
+		a.pl.PlayNext([]netease.Track{tr})
+		a.pl.Next()
+		return
+	}
 	ws := &a.more.wiki
 	if ws.opening != 0 {
 		return
@@ -284,9 +307,16 @@ func (a *app) wikiAlbum(c *ui.Context, al netease.WikiSong) {
 		})
 		ui.Icon(c, iconForward).Size(14, 14).TextColor(white.Alpha(0.45))
 	})
-	if row.Clicked() {
-		a.openPage(route{page: pageAlbum, id: al.ID})
+	if row.Clicked() && al.ID != 0 {
+		a.openPage(route{page: pageAlbum, id: al.ID, source: miguSourceIf(a.migu.albumSource[al.ID]), sourceID: a.migu.albumSource[al.ID]})
 	}
+}
+
+func miguSourceIf(sid string) string {
+	if sid != "" {
+		return migu.Source
+	}
+	return ""
 }
 
 // wikiArtist introduces an artist of the song: who, in what parts, and
@@ -307,8 +337,12 @@ func (a *app) wikiArtist(c *ui.Context, ar netease.WikiArtist, ws *wikiState) {
 			})
 			ui.Icon(c, iconForward).Size(14, 14).TextColor(white.Alpha(0.45))
 		})
-		if head.Clicked() && ar.ID > 0 {
-			a.openArtist(ar.ID)
+		if head.Clicked() && ar.ID != 0 {
+			if sid := a.migu.artistSource[ar.ID]; sid != "" {
+				a.openPage(route{page: pageArtist, id: ar.ID, source: migu.Source, sourceID: sid})
+			} else if ar.ID > 0 {
+				a.openArtist(ar.ID)
+			}
 		}
 		if ar.Brief != "" {
 			if ws.artistOpen == nil {

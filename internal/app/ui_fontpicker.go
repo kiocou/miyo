@@ -117,7 +117,7 @@ func (a *app) fontPickerDialog(c *ui.Context) {
 					row.Children(func() {
 						ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
 							ui.Text(c, name).FontSize(12).TextColor(ink.muted).SingleLine()
-							ui.Text(c, "云音乐 Cloudy 0123").Font(name).FontSize(16).SingleLine()
+							ui.Text(c, "迷一会儿 Miyo 0123").Font(name).FontSize(16).SingleLine()
 						})
 						if id == chosen {
 							ui.Icon(c, iconCheck).Size(14, 14).Shrink(0).TextColor(a.pal.accent)
